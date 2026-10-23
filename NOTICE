@@ -1,0 +1,32 @@
+Pulse
+
+This repository is an original Android project. Its display name is Pulse.
+It is not affiliated with the maker of the strap it is designed to talk to.
+
+Protocol facts in docs/protocol-spec.md (UUIDs, frame layouts, CRC parameters,
+opcodes, offsets, and observed behaviour) were taken from public prose, not from
+another project's source code. Those facts are recorded with a source URL, a
+firmware note, and a confidence label. No source code from the projects below
+is included, copied, or paraphrased here.
+
+Public write-ups used as sources of facts:
+
+- Protocol reference pages at https://github.com/ryanbr/noop/tree/main/docs
+  (PROTOCOL_WHOOP5.md, PROTOCOL_TRANSPORT.md, PROTOCOL_SENSORS.md,
+  PROTOCOL_COMMANDS.md, PROTOCOL_IMPLEMENTATION.md, PROTOCOL_CONCEPTS.md,
+  PROTOCOL.md, BLE_REVERSE_ENGINEERING.md) and the pairing notes in that
+  project's README. That project is PolyForm Noncommercial. Its licence says
+  the protocol facts themselves are free to reuse. Pulse does not use its code,
+  so that licence does not apply to Pulse.
+- https://judes.club/writing/cracking-the-whoop-5-bluetooth-protocol/
+  and the interactive notes at https://judes.club/experiments/whoop5/
+  for capture-backed observations on firmware 50.38.1.0.
+- Bluetooth SIG adopted specifications for the Heart Rate Service, Battery
+  Service, and Device Information Service.
+- The CRC catalogue (CRC-16/MODBUS and CRC-32/ISO-HDLC) for the checksum
+  parameters named by the transport notes.
+
+The OpenStrap application, protocol, and analytics repositories are AGPL-3.0.
+Pulse does not use their code, so that licence does not apply to Pulse.
+
+"WHOOP" is used only nominatively, to identify the strap a person already owns.
