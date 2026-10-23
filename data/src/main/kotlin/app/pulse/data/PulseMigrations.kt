@@ -4,15 +4,25 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * Opens the version-1 database (the device row only) onto the sync schema.
+ * Opens an older database onto the current sync schema.
  *
- * The device table is not rewritten. New tables are created empty. The
- * statements match the Room export for version 2.
+ * Version 1 is the device row only. Version 2 adds the sync tables. Version 3
+ * adds `r18_sample.decoder_version`. The device table is not rewritten.
+ * Existing layout-18 rows gain decoder version 0, meaning they were stored
+ * before a decoder stamped them. New commits write the decoder's own version.
  */
 object PulseMigrations {
     val FROM_1_TO_2: Migration = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             STATEMENTS.forEach { sql -> db.execSQL(sql) }
+        }
+    }
+
+    val FROM_2_TO_3: Migration = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `r18_sample` ADD COLUMN `decoder_version` INTEGER NOT NULL DEFAULT 0",
+            )
         }
     }
 }

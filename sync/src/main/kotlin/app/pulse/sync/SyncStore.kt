@@ -70,6 +70,8 @@ data class RawFrameDraft(
  * [subsecondTicks] is the strap fraction in units of 1/32768 s when the caller
  * has one. Layout 18 itself documents Unix seconds only, so this is null unless
  * a later decoder supplies a fraction. [raw] is the record bytes.
+ * [decoderVersion] is the decoder that produced the row. Zero means the draft
+ * was not stamped.
  */
 data class R18Draft(
     val recordIndex: Long,
@@ -104,6 +106,7 @@ data class R18Draft(
     val sleepAdjacentRaw: Int = 0,
     val crc32: Long = 0,
     val raw: ByteArray = byteArrayOf(),
+    val decoderVersion: Int = 0,
 )
 
 /** Result of [SyncStore.commitChunk]. [duplicate] means the token was already stored. */

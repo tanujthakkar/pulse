@@ -151,6 +151,7 @@ class RoomSyncStoreTest {
         assertEquals(2, read { database.frames().count() })
         assertEquals(1, read { database.samples().count() })
         assertEquals(70, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.heartRateRaw)
+        assertEquals(0, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.decoderVersion)
         assertEquals(4, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.subsecondTicks)
         val kept = read { database.chunks().find(ADDRESS, token(3)) }
         assertNull(kept?.ackedAt)
@@ -276,7 +277,7 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME)
-            .addMigrations(PulseMigrations.FROM_1_TO_2)
+            .addMigrations(PulseMigrations.FROM_1_TO_2, PulseMigrations.FROM_2_TO_3)
             .allowMainThreadQueries()
             .build()
         val stored = room.devices().latest()
@@ -292,8 +293,62 @@ class DeviceSchemaMigrationTest {
         room.close()
     }
 
+    @Test
+    fun version2SampleKeepsItsValuesAndGainsDecoderVersionZero() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(NAME_V2)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(NAME_V2)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(2) {
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            db.execSQL(DEVICE_V1)
+                            PulseMigrations.FROM_1_TO_2.migrate(db)
+                        }
+
+                        override fun onUpgrade(
+                            db: SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                )
+                .build(),
+        )
+        helper.writableDatabase.execSQL(
+            "INSERT INTO `device` (`address`, `helloFirmware`, `informationFirmware`, " +
+                "`commandBatteryPercent`, `serviceBatteryPercent`, `updatedAtMillis`) " +
+                "VALUES ('AA:BB:CC:DD:EE:FF', '50.42.1.0', NULL, 80, 81, 11)",
+        )
+        helper.writableDatabase.execSQL(
+            "INSERT INTO `r18_sample` (`device_id`, `record_index`, `chunk_id`, `unix_s`, " +
+                "`heart_rate_raw`, `rr_count`, `rr_block_raw`, `cardiac_raw`, `quality_raw`, " +
+                "`alternate_hr_raw`, `packed_word_raw`, `dynamic_accel_bits`, " +
+                "`axis_accel_0_bits`, `axis_accel_1_bits`, `axis_accel_2_bits`, `step_counter`, " +
+                "`cadence_raw`, `hardware_counter`, `activity_class_raw`, `counter_override_raw`, " +
+                "`aux_temp_0_raw`, `aux_temp_1_raw`, `skin_temp_raw`, `status_0_raw`, " +
+                "`status_1_raw`, `status_2_raw`, `motion_raw`, `sleep_adjacent_raw`, `crc32`, `raw`) " +
+                "VALUES ('AA:BB:CC:DD:EE:FF', 3, 1, 100, 60, 0, X'00', 0, 0, 9, 0, 0, 0, 0, 0, " +
+                "0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, X'12')",
+        )
+        helper.close()
+
+        val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V2)
+            .addMigrations(PulseMigrations.FROM_2_TO_3)
+            .allowMainThreadQueries()
+            .build()
+        val sample = room.samples().find("AA:BB:CC:DD:EE:FF", 3, 100)
+        assertEquals(60, sample?.heartRateRaw)
+        assertEquals(9, sample?.alternateHrRaw)
+        assertEquals(0, sample?.decoderVersion)
+        assertEquals("50.42.1.0", room.devices().latest()?.helloFirmware)
+        room.close()
+    }
+
     private companion object {
         const val NAME: String = "pulse-migrate.db"
+        const val NAME_V2: String = "pulse-migrate-v2.db"
         const val DEVICE_V1: String =
             "CREATE TABLE IF NOT EXISTS `device` (" +
                 "`address` TEXT NOT NULL, " +
