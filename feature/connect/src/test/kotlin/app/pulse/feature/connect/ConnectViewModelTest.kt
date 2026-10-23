@@ -183,6 +183,8 @@ private class RecordingPorts : LinkPorts {
     override fun openSession(address: String) = Unit
 
     override fun closeSession() = Unit
+
+    override fun watchHeartRate(address: String) = Unit
 }
 
 private class RecordingClock : LinkClock {

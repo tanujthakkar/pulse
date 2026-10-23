@@ -38,6 +38,7 @@ class StrapLinkTransitionTest {
         fx.link.start()
         fx.sight(DeviceBond.PRESENT)
         assertEquals(LinkPhase.CONNECTING, fx.link.snapshot().phase)
+        assertEquals(listOf(ADDRESS), fx.ports.heartRateWatches)
         assertEquals(listOf(ADDRESS), fx.session.opened)
         assertTrue(fx.ports.bonds.isEmpty())
         assertFalse(fx.ports.scanning)
@@ -52,8 +53,21 @@ class StrapLinkTransitionTest {
         assertEquals(LinkPhase.BONDING, fx.link.snapshot().phase)
         assertEquals(listOf(ADDRESS), fx.ports.bonds)
         assertEquals(1, fx.link.snapshot().bondAttempt)
+        assertEquals(listOf(ADDRESS), fx.ports.heartRateWatches)
         assertTrue(fx.session.opened.isEmpty())
         assertFalse(fx.ports.scanning)
+    }
+
+    @Test
+    fun sightingWatchesHeartRateBeforeBondingFinishes() {
+        val fx = Fixture()
+        fx.link.start()
+        fx.sight(DeviceBond.ABSENT)
+        assertEquals(listOf(ADDRESS), fx.ports.heartRateWatches)
+        assertTrue(fx.session.opened.isEmpty())
+        fx.link.onBondChanged(ADDRESS, DeviceBond.PRESENT, refused = false)
+        assertEquals(listOf(ADDRESS), fx.session.opened)
+        assertEquals(listOf(ADDRESS), fx.ports.heartRateWatches)
     }
 
     @Test
@@ -562,6 +576,7 @@ private class FakeLinkPorts(
     var beginResult = BondBegin.STARTED
     val bonds = mutableListOf<String>()
     val cancels = mutableListOf<String>()
+    val heartRateWatches = mutableListOf<String>()
 
     override fun startScan() {
         scanning = true
@@ -581,6 +596,10 @@ private class FakeLinkPorts(
 
     override fun cancelBond() {
         cancels += addressOrBlank()
+    }
+
+    override fun watchHeartRate(address: String) {
+        heartRateWatches += address
     }
 
     override fun openSession(address: String) {

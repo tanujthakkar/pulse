@@ -2,7 +2,7 @@
 
 `./gradlew check` runs the `:ble` unit tests against an in-memory radio. The checks below need a strap the tester owns. They are for task T14 and are not part of CI.
 
-Bonding, live heart rate, the client hello, and history sync are out of scope here.
+The client hello and history sync are out of scope here. Live heart rate has its own section below. The chest-strap comparison in that section stays unchecked until a tester runs it.
 
 Logcat tag: `PulseGatt`.
 
@@ -23,6 +23,8 @@ Logcat tag: `PulseGatt`.
 
 A granted MTU below 247 still passes. 247 is the phone's request, not a strap requirement. A cycle that times out (10 seconds with no callback, `END <op> status=-1` and `CLOSE`) does not count as one of the 20.
 
+When Heart Rate Service `180D` is present, the session writes the `2A37` notify descriptor after discover and before the MTU request. That write is the live heart-rate subscription. It is not one of the four proprietary descriptors above.
+
 ## T5 bond
 
 `./gradlew check` covers the state machine with a fake session. The checks below need a strap the tester owns.
@@ -41,3 +43,12 @@ Logcat tag: `PulseGatt`. Lines look like `link BONDING bond=1 connect=0 address=
 2. Open Connect.
 3. Pass: within 15 seconds the screen shows **Release the other bond** and the status **The strap is still bonded to another phone**.
 4. Pass: after that screen is up, the log does not keep increasing the bond attempt on its own. A later attempt happens only after Try again.
+
+## T6 live heart rate
+
+`./gradlew check` parses Heart Rate Measurement fixtures and checks that a discovered `2A37` is subscribed before the MTU request. The rows below need a strap the tester owns. They are not part of CI.
+
+Heart rate notifications do not require the proprietary bond. On the first sighting the session discovers services, writes the `2A37` notify descriptor, and can deliver bpm before bonding finishes. The four proprietary notify descriptors wait until the bond is present. Milestone 1 does not store the samples.
+
+- [ ] Wear the strap and open Connect so Pulse links. The Live screen shows bpm and R-R, updating about once a second.
+- [ ] Compare that bpm with a chest strap worn at the same time. Pass when Pulse stays within ±2 bpm. Leave this unchecked until the comparison is run.

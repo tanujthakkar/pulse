@@ -18,6 +18,11 @@ class StrapGattTest {
             ),
             StrapGatt.NOTIFY.map { it.toString() },
         )
+        assertEquals("0000180d-0000-1000-8000-00805f9b34fb", StrapGatt.HEART_RATE_SERVICE.toString())
+        assertEquals(
+            "00002a37-0000-1000-8000-00805f9b34fb",
+            StrapGatt.HEART_RATE_MEASUREMENT.toString(),
+        )
         assertEquals("00002902-0000-1000-8000-00805f9b34fb", StrapGatt.CCCD.toString())
         assertArrayEquals(byteArrayOf(0x01, 0x00), StrapGatt.ENABLE_NOTIFICATION)
         assertEquals(247, StrapGatt.REQUESTED_MTU)

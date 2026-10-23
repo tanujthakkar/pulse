@@ -2,6 +2,10 @@ package app.pulse.ble
 
 import java.util.ArrayDeque
 import java.util.UUID
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * One strap link: connect, discover, request MTU, subscribe, then notifications.
@@ -13,8 +17,11 @@ import java.util.UUID
  * elapses, without starting a second operation on top of it.
  *
  * The client hello and other opcodes are not sent from here. Command writes
- * use write-with-response unless the caller says otherwise. Hardware timing
- * for scan and connect cycles is in `docs/hardware-acceptance.md`.
+ * use write-with-response unless the caller says otherwise. When discovery
+ * reports Heart Rate Measurement, its notify descriptor is written before the
+ * MTU request, so [heartRate] can emit while bonding is still unfinished and
+ * before this session is ready. Hardware timing for scan and connect cycles
+ * is in `docs/hardware-acceptance.md`.
  */
 class GattSession internal constructor(
     private val radio: GattRadio,
@@ -24,6 +31,8 @@ class GattSession internal constructor(
     private val notifyOrder: List<UUID> = StrapGatt.NOTIFY,
     private val requestedMtu: Int = StrapGatt.REQUESTED_MTU,
     private val opTimeoutMs: Long = OP_TIMEOUT_MS,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    deferProprietaryNotifies: Boolean = false,
 ) {
     private val runner = SerialRunner()
     private val queue = ArrayDeque<Op>()
@@ -35,6 +44,9 @@ class GattSession internal constructor(
     private var negotiatedMtu = requestedMtu
     private var connected = false
     private var readyNotified = false
+    private var strapNotifiesRequested = !deferProprietaryNotifies
+    private var strapNotifiesQueued = false
+    private var mtuSettled = false
 
     @Volatile
     var phase: SessionPhase = SessionPhase.IDLE
@@ -53,6 +65,15 @@ class GattSession internal constructor(
     @Volatile
     var terminalStatus: Int? = null
         private set
+
+    private val heartRateOut = MutableSharedFlow<LiveHeartRate>(
+        replay = 1,
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Parsed Heart Rate Measurement notifications. Nothing is written to disk. */
+    val heartRate: SharedFlow<LiveHeartRate> = heartRateOut.asSharedFlow()
 
     init {
         radio.listener = object : RadioListener {
@@ -95,6 +116,18 @@ class GattSession internal constructor(
     fun write(characteristic: UUID, value: ByteArray, withResponse: Boolean = true) {
         val payload = value.copyOf()
         runner.execute { enqueueWrite(Op.Write(characteristic, payload, withResponse)) }
+    }
+
+    /**
+     * Queue the proprietary notify descriptors. Heart Rate Measurement does
+     * not wait for this. The link calls it once the bond is present so those
+     * writes are not attempted while bonding is still unfinished.
+     */
+    fun subscribeStrapNotifies() {
+        runner.execute {
+            strapNotifiesRequested = true
+            queueStrapNotifiesIfReady()
+        }
     }
 
     /** Drop queued work, disconnect if the link is up, and close the client. */
@@ -236,7 +269,12 @@ class GattSession internal constructor(
             return
         }
         clearInFlight(GattStatus.SUCCESS)
-        launch(Op.RequestMtu)
+        if (heartRateDiscovered(discovered)) {
+            queue.add(Op.SetNotify(StrapGatt.HEART_RATE_MEASUREMENT))
+            queue.add(Op.Cccd(StrapGatt.HEART_RATE_MEASUREMENT))
+        }
+        queue.add(Op.RequestMtu)
+        pump()
     }
 
     private fun handleMtu(status: Int, mtu: Int) {
@@ -247,11 +285,19 @@ class GattSession internal constructor(
             return
         }
         negotiatedMtu = mtu
+        mtuSettled = true
         clearInFlight(GattStatus.SUCCESS)
         if (phase == SessionPhase.CLOSING) {
             pump()
             return
         }
+        queueStrapNotifiesIfReady()
+    }
+
+    private fun queueStrapNotifiesIfReady() {
+        if (!strapNotifiesRequested || !mtuSettled || strapNotifiesQueued) return
+        if (phase == SessionPhase.CLOSING || phase == SessionPhase.CLOSED) return
+        strapNotifiesQueued = true
         for (characteristic in notifyOrder) {
             queue.add(Op.SetNotify(characteristic))
             queue.add(Op.Cccd(characteristic))
@@ -303,7 +349,18 @@ class GattSession internal constructor(
         if (phase == SessionPhase.CLOSED || phase == SessionPhase.IDLE) return
         opLog.mark("NOTIFY $characteristic bytes=${value.size}")
         log.log("NOTIFY $characteristic bytes=${value.size}")
+        if (characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
+            val sample = StandardHeartRateParser.parse(value, nowMillis())
+            if (sample != null) {
+                heartRateOut.tryEmit(sample)
+            }
+        }
         events.onNotification(characteristic, value)
+    }
+
+    private fun heartRateDiscovered(discovered: DiscoveredGatt): Boolean {
+        return StrapGatt.HEART_RATE_SERVICE in discovered.services &&
+            StrapGatt.HEART_RATE_MEASUREMENT in discovered.characteristics
     }
 
     private fun fail(status: Int) {

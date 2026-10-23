@@ -12,10 +12,19 @@ import app.pulse.ble.GattSession
 import app.pulse.ble.ScanEvents
 import app.pulse.ble.SessionEvents
 import app.pulse.ble.StrapSighting
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
- * Wires [StrapLink] to the platform scanner, bond port, and a new
- * [GattSession] per open. The hello is not written.
+ * Wires [StrapLink] to the platform scanner, bond port, and one [GattSession].
+ *
+ * The session is opened on the first sighting so Heart Rate Measurement can
+ * notify before bonding finishes. A later [openSession] reuses that client.
+ * The hello is not written. Samples stay in [heartRate] and are dropped when
+ * the session closes.
  */
 private class SessionSlot {
     var session: GattSession? = null
@@ -23,9 +32,14 @@ private class SessionSlot {
 
 internal class AndroidLinkHub(
     private val context: Context,
+    private val heartRate: LiveHeartRateFeed,
 ) : LinkPorts {
     private var link: StrapLink? = null
     private var session: GattSession? = null
+    private var sessionAddress: String? = null
+    private var feedGeneration = 0
+    private var heartRateJob: Job? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val scanner = BleClients.strapScanner(
         context,
@@ -69,7 +83,38 @@ internal class AndroidLinkHub(
         bonds.cancel()
     }
 
+    override fun watchHeartRate(address: String) {
+        ensureSession(address)
+    }
+
     override fun openSession(address: String) {
+        when (sessionReuse(session?.phase, session != null && sessionAddress == address)) {
+            SessionReuse.REUSE -> session?.subscribeStrapNotifies()
+            SessionReuse.REUSE_AND_READY -> {
+                session?.subscribeStrapNotifies()
+                link?.onSessionReady()
+            }
+            SessionReuse.REPLACE -> {
+                ensureSession(address)
+                session?.subscribeStrapNotifies()
+            }
+        }
+    }
+
+    override fun closeSession() {
+        dropFeed()
+        val current = session ?: return
+        session = null
+        sessionAddress = null
+        current.disconnect()
+    }
+
+    private fun ensureSession(address: String) {
+        when (sessionReuse(session?.phase, session != null && sessionAddress == address)) {
+            SessionReuse.REUSE, SessionReuse.REUSE_AND_READY -> return
+            SessionReuse.REPLACE -> Unit
+        }
+        dropFeed()
         val previous = session
         val opened = SessionSlot()
         val created = BleClients.gattSession(
@@ -85,27 +130,52 @@ internal class AndroidLinkHub(
                     val active = opened.session ?: return
                     if (session !== active) return
                     session = null
+                    sessionAddress = null
+                    dropFeed()
                     link?.onSessionClosed(reason, active.terminalStatus ?: 0)
                 }
             },
+            deferProprietaryNotifies = true,
         )
         opened.session = created
         session = created
+        sessionAddress = address
+        follow(created)
         previous?.disconnect()
         created.open(address)
     }
 
-    override fun closeSession() {
-        val current = session ?: return
-        session = null
-        current.disconnect()
+    private fun follow(created: GattSession) {
+        val generation = ++feedGeneration
+        heartRateJob?.cancel()
+        heartRateJob = scope.launch {
+            created.heartRate.collect { sample ->
+                if (generation == feedGeneration) {
+                    heartRate.publish(sample)
+                }
+            }
+        }
+    }
+
+    private fun dropFeed() {
+        feedGeneration += 1
+        heartRateJob?.cancel()
+        heartRateJob = null
+        heartRate.clear()
     }
 }
 
+/** The process-wide link and the in-memory heart-rate feed it fills. */
+class LinkAssembly(
+    val strapLink: StrapLink,
+    val heartRate: LiveHeartRateFeed,
+)
+
 object StrapLinks {
-    fun create(context: Context): StrapLink {
+    fun create(context: Context): LinkAssembly {
         val appContext = context.applicationContext
-        val hub = AndroidLinkHub(appContext)
+        val heartRate = LiveHeartRateFeed()
+        val hub = AndroidLinkHub(appContext, heartRate)
         val link = StrapLink(
             ports = hub,
             clock = SystemLinkClock(),
@@ -113,7 +183,7 @@ object StrapLinks {
             log = { line -> Log.i(BleClients.LOG_TAG, line) },
         )
         hub.attach(link)
-        return link
+        return LinkAssembly(link, heartRate)
     }
 
     private fun mainExecutor(): (block: () -> Unit) -> Unit {

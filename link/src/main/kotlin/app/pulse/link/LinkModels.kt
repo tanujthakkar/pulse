@@ -77,6 +77,14 @@ interface LinkPorts {
     fun openSession(address: String)
 
     fun closeSession()
+
+    /**
+     * Open the GATT session so Heart Rate Measurement can be subscribed as
+     * soon as services are discovered. Called on the first sighting, before
+     * bonding finishes. [openSession] is the later signal that the link may
+     * proceed, and reuses this session when it is already up.
+     */
+    fun watchHeartRate(address: String)
 }
 
 fun interface LinkAlarm {

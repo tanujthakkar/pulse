@@ -208,6 +208,8 @@ private fun quietStrapLink(): StrapLink = StrapLink(
         override fun openSession(address: String) = Unit
 
         override fun closeSession() = Unit
+
+        override fun watchHeartRate(address: String) = Unit
     },
     clock = object : LinkClock {
         override fun after(delayMs: Long, task: () -> Unit): LinkAlarm = LinkAlarm { }
