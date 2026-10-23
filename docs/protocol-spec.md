@@ -3,7 +3,7 @@
 Status: **v0**, 2026-10-23. This is the only protocol input for implementers.
 Spec revision tracked in code: `app.pulse.wire.ProtocolSpecVersion.CURRENT` = `0`.
 
-The codec is **not** part of this revision. Do not add frame builders, parsers, checksum code, reassembly, or command correlation until this spec has been reviewed on its own.
+The `:wire` codec implements this document and no other protocol source. Builders, parsers, checksums, reassembly, and command correlation stay within the facts below.
 
 Device, nominative: a WHOOP 5.0 or MG strap the user owns. Baseline firmware for the 5.0/MG contracts below is **50.42.1.0** unless a row names an older capture. WHOOP 4 layouts are out of scope and must not be reused by shifting offsets.
 
@@ -449,7 +449,7 @@ AA 01 08 00 00 01 E6 71 23 01 91 01 36 3E 5C 8D
 | CRC-32 over bytes `[8, 12)` | `0x8D5C3E36`, stored little-endian as `36 3E 5C 8D` | same | 50.42.1.0 | documented |
 | Declared length | `0x0008`. Complete size 16. `(8−4)` is divisible by 4. | same | 50.42.1.0 | documented |
 
-The locked copy is `testing/golden/src/main/resources/frames/hello-command.hex`. The codec that must reproduce it is not in this revision.
+The locked copy is `testing/golden/src/main/resources/frames/hello-command.hex`. The `:wire` hello builder must reproduce these bytes.
 
 ## 14. Project rules
 

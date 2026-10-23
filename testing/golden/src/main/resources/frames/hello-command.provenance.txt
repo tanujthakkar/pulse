@@ -4,4 +4,4 @@ revision: 1
 source: https://github.com/ryanbr/noop/blob/main/docs/PROTOCOL_WHOOP5.md#connection-and-frame-format
 firmware: 50.42.1.0
 confidence: documented
-note: Byte string only. CRC checks belong to the later codec milestone.
+note: Locked byte string for the documented client hello. The :wire hello builder must reproduce it.
