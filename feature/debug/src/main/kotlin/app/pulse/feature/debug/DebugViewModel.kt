@@ -13,7 +13,10 @@ import app.pulse.link.handshakeLine
 import app.pulse.link.helloFirmwareLine
 import app.pulse.link.informationFirmwareLine
 import app.pulse.link.serviceBatteryLine
+import app.pulse.wire.codec.FrameNote
+import app.pulse.wire.codec.FrameRing
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.OutputStream
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,11 +48,18 @@ fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?): String {
     return lines.joinToString(separator = "\n")
 }
 
-/** Shows the link snapshot and the stored device row. Identity text is omitted. */
+/**
+ * Device lines plus the in-memory frame ring.
+ *
+ * Hello identity blocks are omitted from [body] and replaced in each
+ * [FrameNote.hex]. Pausing stops new notes from entering [frames]. Export
+ * writes every note still in the ring, through a stream the caller opened.
+ */
 @HiltViewModel
 class DebugViewModel @Inject constructor(
     link: StrapLink,
     private val devices: DeviceDirectory,
+    val frames: FrameRing,
 ) : ViewModel() {
     val title: String = "Debug"
 
@@ -59,9 +69,57 @@ class DebugViewModel @Inject constructor(
     private val _body = MutableStateFlow(debugBody(link.snapshot(), devices.latest()))
     val body: StateFlow<String> = _body.asStateFlow()
 
+    private val _paused = MutableStateFlow(frames.paused)
+    val paused: StateFlow<Boolean> = _paused.asStateFlow()
+
+    private val _filter = MutableStateFlow(FrameFilter())
+    val filter: StateFlow<FrameFilter> = _filter.asStateFlow()
+
+    private val _rows = MutableStateFlow<List<FrameNote>>(emptyList())
+    val rows: StateFlow<List<FrameNote>> = _rows.asStateFlow()
+
+    private val _stored = MutableStateFlow(0)
+    val stored: StateFlow<Int> = _stored.asStateFlow()
+
+    private val _catalog = MutableStateFlow(FrameCatalog())
+    val catalog: StateFlow<FrameCatalog> = _catalog.asStateFlow()
+
+    private val _exportStatus = MutableStateFlow("")
+    val exportStatus: StateFlow<String> = _exportStatus.asStateFlow()
+
+    private val unwatchFrames: () -> Unit
+
     init {
         link.watch { snapshot ->
             _body.value = debugBody(snapshot, devices.latest())
         }
+        unwatchFrames = frames.watch { publish() }
+        publish()
+    }
+
+    fun setPaused(value: Boolean) {
+        frames.setPaused(value)
+        _paused.value = value
+    }
+
+    fun setFilter(value: FrameFilter) {
+        _filter.value = value
+        publish()
+    }
+
+    /** Writes the whole ring, including notes hidden by the current filter. */
+    fun export(open: () -> OutputStream?) {
+        _exportStatus.value = exportFrames(open, frames.snapshot())
+    }
+
+    override fun onCleared() {
+        unwatchFrames()
+    }
+
+    private fun publish() {
+        val all = frames.snapshot()
+        _rows.value = selectFrames(all, _filter.value)
+        _stored.value = all.size
+        _catalog.value = frameCatalog(all)
     }
 }

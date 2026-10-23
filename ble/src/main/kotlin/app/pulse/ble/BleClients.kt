@@ -21,6 +21,7 @@ object BleClients {
         context: Context,
         events: SessionEvents,
         deferProprietaryNotifies: Boolean = false,
+        frameTap: FrameTap? = null,
     ): GattSession {
         val appContext = context.applicationContext
         return GattSession(
@@ -29,6 +30,7 @@ object BleClients {
             alarms = SystemAlarmClock(),
             log = OpLogger { line -> Log.i(LOG_TAG, line) },
             deferProprietaryNotifies = deferProprietaryNotifies,
+            frameTap = frameTap,
         )
     }
 

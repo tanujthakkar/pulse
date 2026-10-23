@@ -39,6 +39,7 @@ internal class RecordingEvents : SessionEvents {
 internal class SessionFixture(
     nowMillis: () -> Long = { 0L },
     deferProprietaryNotifies: Boolean = false,
+    frameTap: FrameTap? = null,
 ) {
     val radio = FakeGattRadio()
     val clock = ManualAlarmClock()
@@ -49,6 +50,7 @@ internal class SessionFixture(
         clock,
         nowMillis = nowMillis,
         deferProprietaryNotifies = deferProprietaryNotifies,
+        frameTap = frameTap,
     )
 
     init {
