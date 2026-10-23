@@ -11,8 +11,8 @@ import androidx.room.Upsert
 /**
  * One strap this phone has said hello to.
  *
- * Identity blocks from the hello body are not columns. History and sync rows
- * are a later milestone.
+ * Identity blocks from the hello body are not columns. Sync tables reference
+ * [address] and do not replace this row.
  */
 @Entity(tableName = "device")
 data class DeviceRow(
@@ -33,9 +33,25 @@ interface DeviceDao {
     fun latest(): DeviceRow?
 }
 
-@Database(entities = [DeviceRow::class], version = 1, exportSchema = false)
+@Database(
+    entities = [
+        DeviceRow::class,
+        SyncSessionRow::class,
+        SyncChunkRow::class,
+        RawFrameRow::class,
+        R18SampleRow::class,
+        DeviceBatteryRow::class,
+    ],
+    version = 2,
+    exportSchema = true,
+)
 abstract class PulseDatabase : RoomDatabase() {
     abstract fun devices(): DeviceDao
+    abstract fun sessions(): SyncSessionDao
+    abstract fun chunks(): SyncChunkDao
+    abstract fun frames(): RawFrameDao
+    abstract fun samples(): R18SampleDao
+    abstract fun batteries(): DeviceBatteryDao
 }
 
 interface DeviceDirectory {

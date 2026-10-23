@@ -2,6 +2,7 @@ package app.pulse.data
 
 import android.content.Context
 import androidx.room.Room
+import app.pulse.sync.SyncStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,13 +16,22 @@ object DataBindings {
     @Provides
     @Singleton
     fun pulseDatabase(@ApplicationContext context: Context): PulseDatabase {
-        // One short row. Callers may read it on the main thread. Sync commits
-        // are a later milestone and must not reuse this shortcut.
+        // The device row is one short read. Callers may read it on the main
+        // thread. Sync commits go through RoomSyncStore, which does not use
+        // this shortcut.
         return Room.databaseBuilder(context, PulseDatabase::class.java, "pulse.db")
+            .addMigrations(PulseMigrations.FROM_1_TO_2)
             .allowMainThreadQueries()
             .build()
     }
 
     @Provides
     fun deviceDirectory(database: PulseDatabase): DeviceDirectory = RoomDeviceDirectory(database)
+
+    @Provides
+    @Singleton
+    fun roomSyncStore(database: PulseDatabase): RoomSyncStore = RoomSyncStore(database)
+
+    @Provides
+    fun syncStore(store: RoomSyncStore): SyncStore = store
 }
