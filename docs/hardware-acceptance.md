@@ -22,3 +22,22 @@ Logcat tag: `PulseGatt`.
 5. Pass: all 20 cycles log `CLOSE`, no `BEGIN`/`END` pair overlaps, and no GATT client is left open afterward.
 
 A granted MTU below 247 still passes. 247 is the phone's request, not a strap requirement. A cycle that times out (10 seconds with no callback, `END <op> status=-1` and `CLOSE`) does not count as one of the 20.
+
+## T5 bond
+
+`./gradlew check` covers the state machine with a fake session. The checks below need a strap the tester owns.
+
+Logcat tag: `PulseGatt`. Lines look like `link BONDING bond=1 connect=0 address=<addr>`.
+
+### Clean strap
+
+1. The strap is not bonded to another phone. Put it in pairing mode: firm taps until the LEDs flash blue.
+2. Open Connect.
+3. Pass: the screen reaches **Bonded and connected** and the log shows at most two `bond=` values before `link LINKED`. Two attempts is the cap. A third bond request is a failure.
+
+### Still bonded to the official app
+
+1. Leave the strap bonded to the official app. Do not put it in pairing mode.
+2. Open Connect.
+3. Pass: within 15 seconds the screen shows **Release the other bond** and the status **The strap is still bonded to another phone**.
+4. Pass: after that screen is up, the log does not keep increasing the bond attempt on its own. A later attempt happens only after Try again.

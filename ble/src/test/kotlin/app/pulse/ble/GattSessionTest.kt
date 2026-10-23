@@ -44,6 +44,7 @@ class GattSessionTest {
         assertEquals(1, fixture.radio.closeCount)
         assertEquals(SessionPhase.CLOSED, fixture.session.phase)
         assertEquals(CloseReason.REQUESTED, fixture.session.closeReason)
+        assertNull(fixture.session.terminalStatus)
         assertEquals(listOf(CloseReason.REQUESTED), fixture.events.closed)
         assertTrue(fixture.clock.closed)
         assertEquals(1, fixture.events.notifications.size)
@@ -164,6 +165,7 @@ class GattSessionTest {
         assertEquals(1, fixture.radio.closeCount)
         assertEquals(0, fixture.radio.disconnectCount)
         assertEquals(CloseReason.FAILED, fixture.session.closeReason)
+        assertEquals(133, fixture.session.terminalStatus)
         assertEquals(SessionPhase.CLOSED, fixture.session.phase)
         assertTrue(fixture.clock.closed)
         assertEquals(0, fixture.session.overlapCount())
@@ -214,6 +216,7 @@ class GattSessionTest {
         fixture.radio.completeDisconnect()
 
         assertEquals(CloseReason.FAILED, fixture.session.closeReason)
+        assertEquals(5, fixture.session.terminalStatus)
         assertEquals(1, fixture.radio.closeCount)
         assertEquals(1, fixture.radio.maxInFlight)
         assertNull(fixture.events.readyMtu)
