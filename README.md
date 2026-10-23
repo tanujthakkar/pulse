@@ -9,7 +9,7 @@ Milestone 1 includes the project skeleton, the format-1 frame codec in `:wire`, 
 - [`docs/protocol-spec.md`](docs/protocol-spec.md) v0, with a source, firmware, and confidence on every fact
 - Clean-room rules in [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
-`:wire` encodes and decodes format-1 frames, reassembles split notifications, correlates command replies (including a pending result), and builds the documented client hello. `:ble` scans for service `fd4b0001-cce1-4033-93ce-002d5875f58a` and runs one GATT operation at a time: connect, discover, MTU 247, notify subscriptions, notifications, and a disconnect that closes the client. Screens are still placeholders. Bonding, live heart rate, the hello handshake, and sync are later work.
+`:wire` encodes and decodes format-1 frames, reassembles split notifications, correlates command replies (including a pending result), and builds the documented client hello. `:ble` scans for service `fd4b0001-cce1-4033-93ce-002d5875f58a` and runs one GATT operation at a time: connect, discover, MTU 247, notify subscriptions, notifications, and a disconnect that closes the client. The Connect screen asks for Bluetooth scan and connect permission, plus notification permission on Android 13 and later. It does not ask for location. If permission is denied, Connect explains why and opens this app's settings. If Bluetooth is off, Connect asks to turn it on. Pairing stays closed until those grants are in place and the radio is on. Bonding, live heart rate, the hello handshake, and sync are later work.
 
 Strap-in-hand checks for this transport are in [`docs/hardware-acceptance.md`](docs/hardware-acceptance.md).
 
@@ -20,4 +20,4 @@ export ANDROID_HOME="$HOME/android-sdk"   # platforms;android-35 and build-tools
 ./gradlew check
 ```
 
-`check` runs unit tests, Android lint, a scan that rejects `android.permission.INTERNET`, a check that `:wire` stays a pure JVM module, and a line-coverage check of at least 90% on the `:wire` codec package.
+`check` runs unit tests, Android lint, a scan that rejects `android.permission.INTERNET` and location permissions, a check that `:wire` stays a pure JVM module, and a line-coverage check of at least 90% on the `:wire` codec package.

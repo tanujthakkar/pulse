@@ -1,0 +1,177 @@
+package app.pulse.feature.connect
+
+import android.Manifest
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
+class ConnectRouteTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    @Test
+    fun grantPathShowsConnectBody() {
+        val vm = ConnectViewModel(Memory(), MutableProbe(granted(33, bluetoothEnabled = true)))
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { error("grant path must not request permissions") },
+                    openSettings = { error("grant path must not open settings") },
+                    requestEnableBluetooth = { error("grant path must not prompt for Bluetooth") },
+                )
+            }
+        }
+        compose.onNodeWithText("Pairing and connection will live here.").assertIsDisplayed()
+        compose.onNodeWithText("Open settings").assertDoesNotExist()
+        compose.onNodeWithText("Turn on Bluetooth").assertDoesNotExist()
+    }
+
+    @Test
+    fun freshInstallRequestsScanConnectAndNotifications() {
+        val requested = mutableListOf<List<String>>()
+        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(33)))
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { requested += it.toList() },
+                    openSettings = {},
+                    requestEnableBluetooth = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Allow Bluetooth").assertIsDisplayed()
+        compose.onNodeWithText("Pairing and connection will live here.").assertDoesNotExist()
+        assertEquals(
+            listOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ),
+            requested.last(),
+        )
+        assertTrue(requested.last().none { "LOCATION" in it })
+    }
+
+    @Test
+    fun freshInstallOnAndroid12DoesNotRequestNotifications() {
+        val requested = mutableListOf<List<String>>()
+        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(31)))
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { requested += it.toList() },
+                    openSettings = {},
+                    requestEnableBluetooth = {},
+                )
+            }
+        }
+        assertEquals(
+            listOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ),
+            requested.last(),
+        )
+    }
+
+    @Test
+    fun denialShowsRationaleAndSettingsDeepLink() {
+        var openedSettings = false
+        val memory = Memory().apply { markPrompted(LinkPermission.requiredFor(33)) }
+        val vm = ConnectViewModel(
+            memory,
+            MutableProbe(fresh(33)),
+        )
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { error("denial must not re-request before settings") },
+                    openSettings = { openedSettings = true },
+                    requestEnableBluetooth = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Bluetooth permission is off").assertIsDisplayed()
+        compose.onNodeWithText("Open settings").assertIsDisplayed()
+        compose.onNodeWithText("Try again").assertDoesNotExist()
+        compose.onNodeWithText("Pairing and connection will live here.").assertDoesNotExist()
+        compose.onNodeWithText("Open settings").performClick()
+        assertTrue(openedSettings)
+    }
+
+    @Test
+    fun denialThatCanBeAskedAgainStillOffersSettings() {
+        var openedSettings = false
+        val requested = mutableListOf<List<String>>()
+        val vm = ConnectViewModel(
+            Memory(),
+            MutableProbe(fresh(33).copy(rationale = LinkPermission.requiredFor(33).toSet())),
+        )
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { requested += it.toList() },
+                    openSettings = { openedSettings = true },
+                    requestEnableBluetooth = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Try again").assertIsDisplayed()
+        compose.onNodeWithText("Open settings").performClick()
+        assertTrue(openedSettings)
+        compose.onNodeWithText("Try again").performClick()
+        assertEquals(LinkPermission.requiredFor(33).map { it.androidPermission }, requested.last())
+        assertTrue(requested.last().none { "LOCATION" in it })
+    }
+
+    @Test
+    fun bluetoothOffShowsEnablePrompt() {
+        var prompted = false
+        val vm = ConnectViewModel(Memory(), MutableProbe(granted(34, bluetoothEnabled = false)))
+        compose.setContent {
+            MaterialTheme {
+                ConnectRoute(
+                    viewModel = vm,
+                    requestPermissions = { error("bluetooth-off must not request permissions") },
+                    openSettings = { error("bluetooth-off must not open settings") },
+                    requestEnableBluetooth = { prompted = true },
+                )
+            }
+        }
+        compose.onNodeWithText("Bluetooth is off").assertIsDisplayed()
+        compose.onNodeWithText("Turn on Bluetooth").assertIsDisplayed()
+        compose.onNodeWithText("Pairing and connection will live here.").assertDoesNotExist()
+        compose.onNodeWithText("Turn on Bluetooth").performClick()
+        assertTrue(prompted)
+    }
+
+    private fun fresh(sdk: Int) = RadioSnapshot(
+        sdkInt = sdk,
+        granted = emptySet(),
+        rationale = emptySet(),
+        bluetoothEnabled = true,
+    )
+
+    private fun granted(sdk: Int, bluetoothEnabled: Boolean) = RadioSnapshot(
+        sdkInt = sdk,
+        granted = LinkPermission.requiredFor(sdk).toSet(),
+        rationale = emptySet(),
+        bluetoothEnabled = bluetoothEnabled,
+    )
+}
