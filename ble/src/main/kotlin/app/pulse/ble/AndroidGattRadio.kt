@@ -77,6 +77,17 @@ internal class AndroidGattRadio(
         }
 
         @Deprecated("API 33 passes the value separately. Used on API 31 and 32.")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            @Suppress("DEPRECATION")
+            val value = characteristic.value?.copyOf() ?: ByteArray(0)
+            listener?.onCharacteristicRead(characteristic.uuid, status, value)
+        }
+
+        @Deprecated("API 33 passes the value separately. Used on API 31 and 32.")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -95,6 +106,24 @@ internal class AndroidGattRadio(
             value: ByteArray,
         ) {
             listener?.onNotification(characteristic.uuid, value.copyOf())
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            listener?.onCharacteristicRead(characteristic.uuid, status, value.copyOf())
+        }
+
+        @Deprecated("API 33 passes the value separately.")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            // The newer callback delivers the value on API 33.
         }
     }
 
@@ -190,6 +219,17 @@ internal class AndroidGattRadio(
                 @Suppress("DEPRECATION")
                 client.writeCharacteristic(target)
             }
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    override fun readCharacteristic(characteristic: UUID): Boolean {
+        val client = current() ?: return false
+        if (!connectGranted()) return false
+        val target = findCharacteristic(client, characteristic) ?: return false
+        return try {
+            client.readCharacteristic(target)
         } catch (_: SecurityException) {
             false
         }

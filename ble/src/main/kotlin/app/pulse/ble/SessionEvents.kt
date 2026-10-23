@@ -30,5 +30,7 @@ interface SessionEvents {
 
     fun onWriteFinished(characteristic: UUID, status: Int) {}
 
+    fun onReadFinished(characteristic: UUID, status: Int, value: ByteArray) {}
+
     fun onClosed(reason: CloseReason) {}
 }

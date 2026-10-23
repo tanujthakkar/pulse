@@ -23,6 +23,7 @@ fun ConnectScreen(
     linkPanel: LinkPanel? = null,
     onRetryLink: () -> Unit = {},
     onStopLink: () -> Unit = {},
+    onRepairLink: () -> Unit = {},
 ) {
     when (ui) {
         ConnectUi.Checking -> Column(
@@ -102,6 +103,7 @@ fun ConnectScreen(
                     panel = panel,
                     onRetry = onRetryLink,
                     onStop = onStopLink,
+                    onRepair = onRepairLink,
                     modifier = modifier,
                 )
             }

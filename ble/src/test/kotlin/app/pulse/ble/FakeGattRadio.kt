@@ -9,12 +9,14 @@ internal class FakeGattRadio : GattRadio {
 
     private val lock = Any()
     private var inFlightOps = 0
+    private var inFlightRead: UUID? = null
     var maxInFlight: Int = 0
         private set
 
     val started: MutableList<String> = mutableListOf()
     val cccdWrites: MutableList<Pair<UUID, ByteArray>> = mutableListOf()
     val writes: MutableList<WriteCapture> = mutableListOf()
+    val reads: MutableList<UUID> = mutableListOf()
     var requestedMtu: Int? = null
     var connectAddress: String? = null
     var closeCount: Int = 0
@@ -102,6 +104,20 @@ internal class FakeGattRadio : GattRadio {
     fun succeedWrite() {
         leave()
         listener?.onCharacteristicWrite(GattStatus.SUCCESS)
+    }
+
+    override fun readCharacteristic(characteristic: UUID): Boolean {
+        enter("read:$characteristic")
+        reads += characteristic
+        inFlightRead = characteristic
+        return true
+    }
+
+    fun succeedRead(value: ByteArray, status: Int = GattStatus.SUCCESS) {
+        val characteristic = checkNotNull(inFlightRead)
+        inFlightRead = null
+        leave()
+        listener?.onCharacteristicRead(characteristic, status, value)
     }
 
     override fun disconnect() {

@@ -23,6 +23,10 @@ class StrapGattTest {
             "00002a37-0000-1000-8000-00805f9b34fb",
             StrapGatt.HEART_RATE_MEASUREMENT.toString(),
         )
+        assertEquals("0000180f-0000-1000-8000-00805f9b34fb", StrapGatt.BATTERY_SERVICE.toString())
+        assertEquals("00002a19-0000-1000-8000-00805f9b34fb", StrapGatt.BATTERY_LEVEL.toString())
+        assertEquals("0000180a-0000-1000-8000-00805f9b34fb", StrapGatt.DEVICE_INFO_SERVICE.toString())
+        assertEquals("00002a26-0000-1000-8000-00805f9b34fb", StrapGatt.FIRMWARE_REVISION.toString())
         assertEquals("00002902-0000-1000-8000-00805f9b34fb", StrapGatt.CCCD.toString())
         assertArrayEquals(byteArrayOf(0x01, 0x00), StrapGatt.ENABLE_NOTIFICATION)
         assertEquals(247, StrapGatt.REQUESTED_MTU)

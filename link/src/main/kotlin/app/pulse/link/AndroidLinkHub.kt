@@ -11,7 +11,10 @@ import app.pulse.ble.DeviceBond
 import app.pulse.ble.GattSession
 import app.pulse.ble.ScanEvents
 import app.pulse.ble.SessionEvents
+import app.pulse.ble.StrapGatt
 import app.pulse.ble.StrapSighting
+import app.pulse.data.DeviceDirectory
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,9 +25,10 @@ import kotlinx.coroutines.launch
  * Wires [StrapLink] to the platform scanner, bond port, and one [GattSession].
  *
  * The session is opened on the first sighting so Heart Rate Measurement can
- * notify before bonding finishes. A later [openSession] reuses that client.
- * The hello is not written. Samples stay in [heartRate] and are dropped when
- * the session closes.
+ * notify before bonding finishes. A later [openSession] reuses that client
+ * and subscribes the proprietary notifies. When those descriptors are on,
+ * [StrapHandshake] writes the client hello. Samples stay in [heartRate] and
+ * are dropped when the session closes. A failed hello leaves the session up.
  */
 private class SessionSlot {
     var session: GattSession? = null
@@ -33,10 +37,13 @@ private class SessionSlot {
 internal class AndroidLinkHub(
     private val context: Context,
     private val heartRate: LiveHeartRateFeed,
+    private val devices: DeviceDirectory,
 ) : LinkPorts {
     private var link: StrapLink? = null
     private var session: GattSession? = null
     private var sessionAddress: String? = null
+    private var handshake: StrapHandshake? = null
+    private val handshakeClock = SystemLinkClock()
     private var feedGeneration = 0
     private var heartRateJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -103,6 +110,8 @@ internal class AndroidLinkHub(
 
     override fun closeSession() {
         dropFeed()
+        handshake?.stop()
+        handshake = null
         val current = session ?: return
         session = null
         sessionAddress = null
@@ -115,6 +124,8 @@ internal class AndroidLinkHub(
             SessionReuse.REPLACE -> Unit
         }
         dropFeed()
+        handshake?.stop()
+        handshake = null
         val previous = session
         val opened = SessionSlot()
         val created = BleClients.gattSession(
@@ -124,15 +135,40 @@ internal class AndroidLinkHub(
                     val active = opened.session ?: return
                     if (session !== active) return
                     link?.onSessionReady()
+                    startHandshake(active)
+                }
+
+                override fun onNotification(characteristic: UUID, value: ByteArray) {
+                    val active = opened.session ?: return
+                    if (session !== active) return
+                    handshake?.onNotification(characteristic, value)
+                }
+
+                override fun onWriteFinished(characteristic: UUID, status: Int) {
+                    val active = opened.session ?: return
+                    if (session !== active) return
+                    handshake?.onWriteFinished(characteristic, status)
+                }
+
+                override fun onReadFinished(characteristic: UUID, status: Int, value: ByteArray) {
+                    val active = opened.session ?: return
+                    if (session !== active) return
+                    handshake?.onRead(characteristic, status, value)
                 }
 
                 override fun onClosed(reason: CloseReason) {
                     val active = opened.session ?: return
                     if (session !== active) return
+                    handshake?.stop()
+                    handshake = null
                     session = null
                     sessionAddress = null
                     dropFeed()
-                    link?.onSessionClosed(reason, active.terminalStatus ?: 0)
+                    link?.onSessionClosed(
+                        reason,
+                        active.terminalStatus ?: 0,
+                        active.proprietaryUnbonded,
+                    )
                 }
             },
             deferProprietaryNotifies = true,
@@ -143,6 +179,26 @@ internal class AndroidLinkHub(
         follow(created)
         previous?.disconnect()
         created.open(address)
+    }
+
+    private fun startHandshake(active: GattSession) {
+        if (handshake != null) return
+        val target = sessionAddress ?: return
+        val created = StrapHandshake(
+            address = target,
+            knows = active::knows,
+            write = { bytes -> active.write(StrapGatt.COMMAND, bytes, withResponse = true) },
+            read = active::read,
+            clock = handshakeClock,
+            devices = devices,
+            heartRateLive = {
+                active.heartRateChannelUp || active.heartRate.replayCache.isNotEmpty()
+            },
+            report = { update -> link?.onDeviceReport(update) },
+            log = { line -> Log.i(BleClients.LOG_TAG, line) },
+        )
+        handshake = created
+        created.start()
     }
 
     private fun follow(created: GattSession) {
@@ -172,10 +228,10 @@ class LinkAssembly(
 )
 
 object StrapLinks {
-    fun create(context: Context): LinkAssembly {
+    fun create(context: Context, devices: DeviceDirectory): LinkAssembly {
         val appContext = context.applicationContext
         val heartRate = LiveHeartRateFeed()
-        val hub = AndroidLinkHub(appContext, heartRate)
+        val hub = AndroidLinkHub(appContext, heartRate, devices)
         val link = StrapLink(
             ports = hub,
             clock = SystemLinkClock(),

@@ -26,6 +26,8 @@ internal interface RadioListener {
 
     fun onCharacteristicWrite(status: Int)
 
+    fun onCharacteristicRead(characteristic: UUID, status: Int, value: ByteArray)
+
     fun onNotification(characteristic: UUID, value: ByteArray)
 }
 
@@ -51,6 +53,8 @@ internal interface GattRadio {
     fun writeCccd(characteristic: UUID, value: ByteArray): Boolean
 
     fun writeCharacteristic(characteristic: UUID, value: ByteArray, withResponse: Boolean): Boolean
+
+    fun readCharacteristic(characteristic: UUID): Boolean
 
     fun disconnect()
 

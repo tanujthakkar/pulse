@@ -422,4 +422,84 @@ class GattSessionTest {
         assertEquals(0, fixture.radio.closeCount)
         assertTrue(fixture.events.closed.isEmpty())
     }
+
+    @Test
+    fun responseDescriptorTimeoutWhileHeartRateIsUpMarksUnbonded() {
+        val fixture = SessionFixture(deferProprietaryNotifies = true)
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE, StrapGatt.HEART_RATE_SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet() + StrapGatt.HEART_RATE_MEASUREMENT,
+        )
+        fixture.radio.succeedCccd()
+        fixture.radio.succeedMtu(247)
+        assertTrue(fixture.session.heartRateChannelUp)
+        assertNull(fixture.events.readyMtu)
+
+        fixture.session.subscribeStrapNotifies()
+        assertEquals(GattSession.PROPRIETARY_CCCD_TIMEOUT_MS, fixture.clock.delays.last())
+        fixture.clock.fire()
+
+        assertTrue(fixture.session.proprietaryUnbonded)
+        assertEquals(CloseReason.TIMED_OUT, fixture.session.closeReason)
+        assertEquals(SessionPhase.CLOSED, fixture.session.phase)
+        assertEquals(1, fixture.radio.closeCount)
+        assertSerialized(fixture.session.opLogSnapshot())
+    }
+
+    @Test
+    fun responseDescriptorTimeoutWithoutHeartRateIsAPlainTimeout() {
+        val fixture = SessionFixture()
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet(),
+        )
+        fixture.radio.succeedMtu(247)
+        assertFalse(fixture.session.heartRateChannelUp)
+        assertEquals(GattSession.PROPRIETARY_CCCD_TIMEOUT_MS, fixture.clock.delays.last())
+        fixture.clock.fire()
+
+        assertFalse(fixture.session.proprietaryUnbonded)
+        assertEquals(CloseReason.TIMED_OUT, fixture.session.closeReason)
+        assertEquals(SessionPhase.CLOSED, fixture.session.phase)
+    }
+
+    @Test
+    fun readsStaySerializedAndAFailedReadLeavesTheSessionUp() {
+        val fixture = SessionFixture()
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(
+                StrapGatt.SERVICE,
+                StrapGatt.DEVICE_INFO_SERVICE,
+                StrapGatt.BATTERY_SERVICE,
+            ),
+            characteristics = StrapGatt.NOTIFY.toSet() +
+                setOf(StrapGatt.COMMAND, StrapGatt.FIRMWARE_REVISION, StrapGatt.BATTERY_LEVEL),
+        )
+        fixture.radio.succeedMtu(247)
+        repeat(StrapGatt.NOTIFY.size) { fixture.radio.succeedCccd() }
+        assertTrue(fixture.session.knows(StrapGatt.FIRMWARE_REVISION))
+        assertTrue(fixture.session.knows(StrapGatt.BATTERY_LEVEL))
+
+        fixture.session.read(StrapGatt.FIRMWARE_REVISION)
+        fixture.session.read(StrapGatt.BATTERY_LEVEL)
+        assertEquals(listOf(StrapGatt.FIRMWARE_REVISION), fixture.radio.reads)
+
+        fixture.radio.succeedRead("50.42.1.0".encodeToByteArray())
+        fixture.radio.succeedRead(byteArrayOf(81), status = 5)
+
+        assertEquals(SessionPhase.READY, fixture.session.phase)
+        assertEquals(0, fixture.radio.closeCount)
+        assertEquals(StrapGatt.FIRMWARE_REVISION, fixture.events.reads[0].first)
+        assertEquals(0, fixture.events.reads[0].second)
+        assertEquals("50.42.1.0", fixture.events.reads[0].third.decodeToString())
+        assertEquals(5, fixture.events.reads[1].second)
+        assertEquals(1, fixture.radio.maxInFlight)
+        assertSerialized(fixture.session.opLogSnapshot())
+    }
 }

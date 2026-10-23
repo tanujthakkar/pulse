@@ -31,6 +31,7 @@ kotlin {
 dependencies {
     implementation(project(":ble"))
     implementation(project(":wire"))
+    implementation(project(":data"))
     implementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)

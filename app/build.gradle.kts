@@ -47,6 +47,7 @@ dependencies {
     implementation(project(":feature:sync"))
     implementation(project(":feature:debug"))
     implementation(project(":link"))
+    implementation(project(":data"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

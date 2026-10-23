@@ -15,8 +15,11 @@ import java.util.ArrayDeque
  * or bonding that is still unfinished after [StrapLinkLimits.PAIRING_HELP_AFTER_MS],
  * moves to [LinkPhase.PAIRING_HELP] and stops. A clean failure is retried once
  * ([StrapLinkLimits.BOND_ATTEMPTS], [StrapLinkLimits.CONNECT_ATTEMPTS]) and
- * then stops. The client hello is not sent. Heart Rate Measurement is watched
- * from the first sighting, including while bonding is still unfinished.
+ * then stops. A proprietary response-descriptor timeout while Heart Rate
+ * Measurement is already up takes the same pairing-help path. Heart Rate
+ * Measurement is watched from the first sighting, including while bonding is
+ * still unfinished. The client hello runs after the session is ready. If that
+ * hello fails and heart rate is live, the session stays up and [repair] is offered.
  *
  * Transitions:
  * - Idle → Scanning on [start]
@@ -54,6 +57,13 @@ class StrapLink(
     private var phase = LinkPhase.IDLE
     private var block = LinkBlock.NONE
     private var scanFailure: Int? = null
+    private var hello = HelloProgress.IDLE
+    private var offerRepair = false
+    private var heartRateLive = false
+    private var helloFirmware: String? = null
+    private var informationFirmware: String? = null
+    private var commandBatteryPercent: Long? = null
+    private var serviceBatteryPercent: Int? = null
 
     @Volatile
     private var current = LinkSnapshot()
@@ -79,6 +89,7 @@ class StrapLink(
         resetBudget()
         phase = LinkPhase.IDLE
         block = LinkBlock.NONE
+        clearDevice()
         releaseRadio()
         publish()
     }
@@ -87,6 +98,18 @@ class StrapLink(
     fun retry() = onState {
         if (phase != LinkPhase.PAIRING_HELP && phase != LinkPhase.FAILED) return@onState
         resetBudget()
+        beginScan()
+    }
+
+    /**
+     * User-initiated after hello failed and heart rate is still live.
+     * Closes the current session and looks for the strap again.
+     */
+    fun repair() = onState {
+        if (phase != LinkPhase.LINKED || !offerRepair) return@onState
+        cancelDeadline()
+        resetBudget()
+        releaseRadio()
         beginScan()
     }
 
@@ -127,17 +150,42 @@ class StrapLink(
         sessionAttempts = 0
         phase = LinkPhase.LINKED
         block = LinkBlock.NONE
+        if (hello == HelloProgress.IDLE) {
+            hello = HelloProgress.WAITING
+            offerRepair = false
+        }
         publish()
     }
 
-    fun onSessionClosed(reason: CloseReason, status: Int) = onState {
+    /** Hello progress and the firmware or battery values learned along the way. */
+    fun onDeviceReport(report: DeviceReport) = onState {
+        if (phase != LinkPhase.LINKED && phase != LinkPhase.CONNECTING) return@onState
+        helloFirmware = report.helloFirmware
+        informationFirmware = report.informationFirmware
+        commandBatteryPercent = report.commandBatteryPercent
+        serviceBatteryPercent = report.serviceBatteryPercent
+        if (report.settled) {
+            if (report.succeeded) {
+                hello = HelloProgress.SUCCEEDED
+                offerRepair = false
+                heartRateLive = report.heartRateLive
+            } else {
+                hello = HelloProgress.FAILED
+                offerRepair = true
+                heartRateLive = report.heartRateLive
+            }
+        }
+        publish()
+    }
+
+    fun onSessionClosed(reason: CloseReason, status: Int, proprietaryUnbonded: Boolean = false) = onState {
         if (phase == LinkPhase.LINKED && reason != CloseReason.REQUESTED) {
             sessionAttempts = 0
             beginScan()
             return@onState
         }
         if (phase != LinkPhase.CONNECTING || reason == CloseReason.REQUESTED) return@onState
-        if (SessionFault.otherCentralHoldsBond(status)) {
+        if (proprietaryUnbonded || SessionFault.otherCentralHoldsBond(status)) {
             enterTerminal(LinkPhase.PAIRING_HELP, LinkBlock.BOND)
             return@onState
         }
@@ -152,6 +200,7 @@ class StrapLink(
         phase = LinkPhase.SCANNING
         block = LinkBlock.NONE
         scanFailure = null
+        clearDevice()
         publish()
         ports.startScan()
     }
@@ -200,8 +249,19 @@ class StrapLink(
         cancelDeadline()
         phase = next
         block = why
+        clearDevice()
         releaseRadio()
         publish()
+    }
+
+    private fun clearDevice() {
+        hello = HelloProgress.IDLE
+        offerRepair = false
+        heartRateLive = false
+        helloFirmware = null
+        informationFirmware = null
+        commandBatteryPercent = null
+        serviceBatteryPercent = null
     }
 
     private fun releaseRadio() {
@@ -242,6 +302,13 @@ class StrapLink(
             block = block,
             scanFailure = scanFailure,
             bluetoothOff = scanFailure == ScanFailure.ADAPTER_OFF,
+            hello = hello,
+            offerRepair = offerRepair,
+            heartRateLive = heartRateLive,
+            helloFirmware = helloFirmware,
+            informationFirmware = informationFirmware,
+            commandBatteryPercent = commandBatteryPercent,
+            serviceBatteryPercent = serviceBatteryPercent,
         )
         log(
             "link ${current.phase} bond=${current.bondAttempt} " +

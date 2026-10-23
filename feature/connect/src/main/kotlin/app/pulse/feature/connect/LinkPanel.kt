@@ -18,6 +18,12 @@ import app.pulse.link.LinkBlock
 import app.pulse.link.LinkPhase
 import app.pulse.link.LinkSnapshot
 import app.pulse.link.StrapLinkLimits
+import app.pulse.link.commandBatteryLine
+import app.pulse.link.firmwareNote
+import app.pulse.link.handshakeLine
+import app.pulse.link.helloFirmwareLine
+import app.pulse.link.informationFirmwareLine
+import app.pulse.link.serviceBatteryLine
 
 /**
  * Copy for one [LinkSnapshot]. [pairingHelp] is the screen shown when the
@@ -32,6 +38,13 @@ data class LinkPanel(
     val helpBody: String,
     val allowRetry: Boolean,
     val showStop: Boolean,
+    val handshake: String?,
+    val helloFirmware: String?,
+    val informationFirmware: String?,
+    val firmwareNote: String?,
+    val commandBattery: String?,
+    val serviceBattery: String?,
+    val offerRepair: Boolean,
 ) {
     companion object {
         const val HELP_TITLE: String = "Release the other bond"
@@ -60,6 +73,13 @@ data class LinkPanel(
                     snapshot.phase == LinkPhase.BONDING ||
                     snapshot.phase == LinkPhase.CONNECTING ||
                     snapshot.phase == LinkPhase.LINKED,
+                handshake = handshakeLine(snapshot.hello, snapshot.heartRateLive),
+                helloFirmware = helloFirmwareLine(snapshot.helloFirmware),
+                informationFirmware = informationFirmwareLine(snapshot.informationFirmware),
+                firmwareNote = firmwareNote(snapshot.helloFirmware, snapshot.informationFirmware),
+                commandBattery = commandBatteryLine(snapshot.commandBatteryPercent),
+                serviceBattery = serviceBatteryLine(snapshot.serviceBatteryPercent),
+                offerRepair = snapshot.offerRepair,
             )
         }
 
@@ -93,6 +113,7 @@ fun LinkPanelContent(
     panel: LinkPanel,
     onRetry: () -> Unit,
     onStop: () -> Unit,
+    onRepair: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -108,6 +129,24 @@ fun LinkPanelContent(
         if (panel.address != null) {
             Text(text = panel.address, style = MaterialTheme.typography.bodyMedium)
         }
+        panel.handshake?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
+        panel.helloFirmware?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
+        panel.informationFirmware?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
+        panel.firmwareNote?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
+        panel.commandBattery?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
+        panel.serviceBattery?.let { line ->
+            Text(text = line, style = MaterialTheme.typography.bodyLarge)
+        }
         if (panel.pairingHelp) {
             Text(text = panel.helpTitle, style = MaterialTheme.typography.titleLarge)
             Text(text = panel.helpBody, style = MaterialTheme.typography.bodyLarge)
@@ -117,6 +156,11 @@ fun LinkPanelContent(
         } else if (panel.allowRetry) {
             Button(onClick = onRetry) {
                 Text(text = stringResource(R.string.connect_try_again))
+            }
+        }
+        if (panel.offerRepair) {
+            Button(onClick = onRepair) {
+                Text(text = "Re-pair")
             }
         }
         if (panel.showStop) {

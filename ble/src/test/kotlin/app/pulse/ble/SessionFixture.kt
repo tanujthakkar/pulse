@@ -12,6 +12,7 @@ internal class RecordingEvents : SessionEvents {
     val notifications = mutableListOf<Pair<UUID, ByteArray>>()
     val closed = mutableListOf<CloseReason>()
     val writeResults = mutableListOf<Pair<UUID, Int>>()
+    val reads = mutableListOf<Triple<UUID, Int, ByteArray>>()
 
     override fun onReady(mtu: Int) {
         readyMtu = mtu
@@ -24,6 +25,10 @@ internal class RecordingEvents : SessionEvents {
 
     override fun onWriteFinished(characteristic: UUID, status: Int) {
         writeResults += characteristic to status
+    }
+
+    override fun onReadFinished(characteristic: UUID, status: Int, value: ByteArray) {
+        reads += Triple(characteristic, status, value.copyOf())
     }
 
     override fun onClosed(reason: CloseReason) {

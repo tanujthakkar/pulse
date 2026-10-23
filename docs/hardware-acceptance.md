@@ -52,3 +52,17 @@ Heart rate notifications do not require the proprietary bond. On the first sight
 
 - [ ] Wear the strap and open Connect so Pulse links. The Live screen shows bpm and R-R, updating about once a second.
 - [ ] Compare that bpm with a chest strap worn at the same time. Pass when Pulse stays within ±2 bpm. Leave this unchecked until the comparison is run.
+
+## T7 hello, battery, and firmware
+
+`./gradlew check` runs the published client hello through the codec and the request tracker. It does not include a strap capture. The rows below stay unchecked until a tester runs them on a strap they own.
+
+History acknowledgement stays disabled until the metadata row is checked. A debug flag cannot enable it while the metadata offsets are still unconfirmed.
+
+- [ ] After the bond, the log shows the notify descriptors on `fd4b0003`, `fd4b0004`, `fd4b0005`, and `fd4b0007` completing, then a hello write to `fd4b0002`. `2A37` is still subscribed before the MTU request.
+- [ ] Hello reaches a final success. Connect shows `Firmware (hello):` and, when Device Information is present, `Firmware (device information):` beside it, plus whether the two strings match.
+- [ ] Connect shows `Battery (command 26):` and, when Battery Level is present, `Battery (standard battery service):`.
+- [ ] If the `fd4b0003` notify descriptor does not complete in about 5 seconds while live heart rate is updating, Connect shows **Release the other bond**.
+- [ ] If hello fails and live heart rate still updates, the Live screen keeps bpm and Connect offers **Re-pair**.
+- [ ] Save a scrubbed hello response as `testing/golden/src/main/resources/frames/slots/captured-hello-response.hex`. Zero command-body offsets 14..78 before committing. Do not commit a clear identity block.
+- [ ] Save a scrubbed metadata frame as `testing/golden/src/main/resources/frames/slots/captured-metadata.hex`. Confirm kind at frame byte 10 and the 8-byte token at frame offsets 21..28. Leave this unchecked until that capture exists.
