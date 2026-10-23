@@ -21,6 +21,14 @@ enum class LinkPhase {
     FAILED,
 }
 
+/** Client hello after the proprietary notify descriptors are in place. */
+enum class HelloProgress {
+    IDLE,
+    WAITING,
+    SUCCEEDED,
+    FAILED,
+}
+
 /** Why a terminal phase was entered. [NONE] while the link is still working. */
 enum class LinkBlock {
     NONE,
@@ -37,6 +45,31 @@ data class LinkSnapshot(
     val block: LinkBlock = LinkBlock.NONE,
     val scanFailure: Int? = null,
     val bluetoothOff: Boolean = false,
+    val hello: HelloProgress = HelloProgress.IDLE,
+    val offerRepair: Boolean = false,
+    val heartRateLive: Boolean = false,
+    val helloFirmware: String? = null,
+    val informationFirmware: String? = null,
+    val commandBatteryPercent: Long? = null,
+    val serviceBatteryPercent: Int? = null,
+)
+
+/**
+ * What the handshake has learned about the connected strap.
+ *
+ * Null firmware and battery fields mean those reads have not succeeded.
+ * [settled] is true once hello has a final result. [succeeded] is that result.
+ * [heartRateLive] is true when Heart Rate Measurement is already flowing, which
+ * is what keeps the session up after a failed hello.
+ */
+data class DeviceReport(
+    val helloFirmware: String? = null,
+    val informationFirmware: String? = null,
+    val commandBatteryPercent: Long? = null,
+    val serviceBatteryPercent: Int? = null,
+    val settled: Boolean = false,
+    val succeeded: Boolean = false,
+    val heartRateLive: Boolean = false,
 )
 
 object StrapLinkLimits {

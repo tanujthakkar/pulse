@@ -513,6 +513,75 @@ class StrapLinkTransitionTest {
     }
 
     @Test
+    fun proprietaryTimeoutWhileHeartRateIsLiveShowsPairingHelp() {
+        val fx = Fixture()
+        fx.connectUntilWaiting()
+        fx.link.onSessionClosed(
+            CloseReason.TIMED_OUT,
+            status = -1,
+            proprietaryUnbonded = true,
+        )
+        assertEquals(LinkPhase.PAIRING_HELP, fx.link.snapshot().phase)
+        assertEquals(LinkBlock.BOND, fx.link.snapshot().block)
+        assertEquals(1, fx.session.opened.size)
+        assertFalse(fx.session.open)
+        fx.link.onSessionClosed(CloseReason.TIMED_OUT, status = -1, proprietaryUnbonded = true)
+        assertEquals(1, fx.session.opened.size)
+    }
+
+    @Test
+    fun helloFailureWithLiveHeartRateStaysUpAndRepairScansAgain() {
+        val fx = Fixture()
+        fx.connectUntilWaiting()
+        fx.link.onSessionReady()
+        fx.link.onDeviceReport(
+            DeviceReport(
+                settled = true,
+                succeeded = false,
+                heartRateLive = true,
+                serviceBatteryPercent = 70,
+            ),
+        )
+        assertEquals(LinkPhase.LINKED, fx.link.snapshot().phase)
+        assertEquals(HelloProgress.FAILED, fx.link.snapshot().hello)
+        assertTrue(fx.link.snapshot().offerRepair)
+        assertTrue(fx.link.snapshot().heartRateLive)
+        assertTrue(fx.session.open)
+        assertEquals(70, fx.link.snapshot().serviceBatteryPercent)
+
+        fx.link.repair()
+        assertEquals(LinkPhase.SCANNING, fx.link.snapshot().phase)
+        assertFalse(fx.session.open)
+        assertFalse(fx.link.snapshot().offerRepair)
+        assertEquals(HelloProgress.IDLE, fx.link.snapshot().hello)
+    }
+
+    @Test
+    fun helloSuccessRecordsFirmwareAndIgnoresRepair() {
+        val fx = Fixture()
+        fx.connectUntilWaiting()
+        fx.link.onSessionReady()
+        assertEquals(HelloProgress.WAITING, fx.link.snapshot().hello)
+        fx.link.onDeviceReport(
+            DeviceReport(
+                helloFirmware = "50.42.1.0",
+                informationFirmware = "50.42.1.0",
+                commandBatteryPercent = 80,
+                settled = true,
+                succeeded = true,
+                heartRateLive = true,
+            ),
+        )
+        assertEquals(HelloProgress.SUCCEEDED, fx.link.snapshot().hello)
+        assertFalse(fx.link.snapshot().offerRepair)
+        assertEquals("50.42.1.0", fx.link.snapshot().helloFirmware)
+        assertEquals(80L, fx.link.snapshot().commandBatteryPercent)
+        fx.link.repair()
+        assertEquals(LinkPhase.LINKED, fx.link.snapshot().phase)
+        assertTrue(fx.session.open)
+    }
+
+    @Test
     fun pairingHelpDoesNotFollowASuccessfulBondThatDrops() {
         val fx = Fixture()
         fx.connectUntilWaiting()

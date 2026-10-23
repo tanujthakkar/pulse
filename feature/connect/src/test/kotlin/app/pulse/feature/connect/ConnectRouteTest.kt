@@ -6,6 +6,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import app.pulse.link.HelloProgress
+import app.pulse.link.LinkPhase
+import app.pulse.link.LinkSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -161,6 +164,42 @@ class ConnectRouteTest {
         compose.onNodeWithText("Pairing and connection will live here.").assertDoesNotExist()
         compose.onNodeWithText("Turn on Bluetooth").performClick()
         assertTrue(prompted)
+    }
+
+    @Test
+    fun linkedPanelShowsFirmwareBatterySourcesAndRepair() {
+        val panel = LinkPanel.from(
+            LinkSnapshot(
+                phase = LinkPhase.LINKED,
+                hello = HelloProgress.FAILED,
+                offerRepair = true,
+                heartRateLive = true,
+                helloFirmware = "50.42.1.0",
+                informationFirmware = "50.42.1.1",
+                commandBatteryPercent = 80,
+                serviceBatteryPercent = 81,
+            ),
+        )
+        var repaired = false
+        compose.setContent {
+            MaterialTheme {
+                LinkPanelContent(
+                    panel = panel,
+                    onRetry = {},
+                    onStop = {},
+                    onRepair = { repaired = true },
+                )
+            }
+        }
+        compose.onNodeWithText("Bonded and connected.").assertIsDisplayed()
+        compose.onNodeWithText("Hello failed. Live heart rate is still on.").assertIsDisplayed()
+        compose.onNodeWithText("Firmware (hello): 50.42.1.0").assertIsDisplayed()
+        compose.onNodeWithText("Firmware (device information): 50.42.1.1").assertIsDisplayed()
+        compose.onNodeWithText("Firmware strings differ.").assertIsDisplayed()
+        compose.onNodeWithText("Battery (command 26): 80%").assertIsDisplayed()
+        compose.onNodeWithText("Battery (standard battery service): 81%").assertIsDisplayed()
+        compose.onNodeWithText("Re-pair").performClick()
+        assertTrue(repaired)
     }
 
     private fun fresh(sdk: Int) = RadioSnapshot(

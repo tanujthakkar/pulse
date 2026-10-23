@@ -68,6 +68,10 @@ class ConnectViewModel @Inject constructor(
         link.stop()
     }
 
+    fun repairLink() {
+        link.repair()
+    }
+
     internal fun publish(snapshot: RadioSnapshot) {
         val next = ConnectGatePolicy.evaluate(snapshot, memory.prompted())
         val wasReady = _ui.value == ConnectUi.Ready

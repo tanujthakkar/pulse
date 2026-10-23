@@ -1,5 +1,6 @@
 package app.pulse.feature.connect
 
+import app.pulse.link.HelloProgress
 import app.pulse.link.LinkBlock
 import app.pulse.link.LinkPhase
 import app.pulse.link.LinkSnapshot
@@ -58,6 +59,42 @@ class LinkPanelTest {
             LinkSnapshot(phase = LinkPhase.FAILED, block = LinkBlock.SCAN, scanFailure = 1),
         )
         assertEquals("The scan stopped before a strap was found.", other.status)
+    }
+
+    @Test
+    fun linkedHelloShowsBothFirmwareSourcesAndBothBatteries() {
+        val match = LinkPanel.from(
+            LinkSnapshot(
+                phase = LinkPhase.LINKED,
+                hello = HelloProgress.SUCCEEDED,
+                helloFirmware = "50.42.1.0",
+                informationFirmware = "50.42.1.0",
+                commandBatteryPercent = 80,
+                serviceBatteryPercent = 81,
+            ),
+        )
+        assertEquals("Hello succeeded.", match.handshake)
+        assertEquals("Firmware (hello): 50.42.1.0", match.helloFirmware)
+        assertEquals("Firmware (device information): 50.42.1.0", match.informationFirmware)
+        assertEquals("Firmware strings match.", match.firmwareNote)
+        assertEquals("Battery (command 26): 80%", match.commandBattery)
+        assertEquals("Battery (standard battery service): 81%", match.serviceBattery)
+        assertFalse(match.offerRepair)
+
+        val differ = LinkPanel.from(
+            LinkSnapshot(
+                phase = LinkPhase.LINKED,
+                hello = HelloProgress.FAILED,
+                offerRepair = true,
+                heartRateLive = true,
+                helloFirmware = "50.42.1.0",
+                informationFirmware = "50.38.1.0",
+            ),
+        )
+        assertEquals("Firmware strings differ.", differ.firmwareNote)
+        assertEquals("Hello failed. Live heart rate is still on.", differ.handshake)
+        assertTrue(differ.offerRepair)
+        assertTrue(differ.showStop)
     }
 
     @Test

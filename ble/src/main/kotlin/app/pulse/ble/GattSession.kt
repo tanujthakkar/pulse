@@ -20,8 +20,9 @@ import kotlinx.coroutines.flow.asSharedFlow
  * use write-with-response unless the caller says otherwise. When discovery
  * reports Heart Rate Measurement, its notify descriptor is written before the
  * MTU request, so [heartRate] can emit while bonding is still unfinished and
- * before this session is ready. Hardware timing for scan and connect cycles
- * is in `docs/hardware-acceptance.md`.
+ * before this session is ready. The proprietary response descriptor
+ * [StrapGatt.RESPONSE_NOTIFY] uses [PROPRIETARY_CCCD_TIMEOUT_MS]. Hardware
+ * timing for scan and connect cycles is in `docs/hardware-acceptance.md`.
  */
 class GattSession internal constructor(
     private val radio: GattRadio,
@@ -31,12 +32,13 @@ class GattSession internal constructor(
     private val notifyOrder: List<UUID> = StrapGatt.NOTIFY,
     private val requestedMtu: Int = StrapGatt.REQUESTED_MTU,
     private val opTimeoutMs: Long = OP_TIMEOUT_MS,
+    private val proprietaryCccdTimeoutMs: Long = PROPRIETARY_CCCD_TIMEOUT_MS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     deferProprietaryNotifies: Boolean = false,
 ) {
     private val runner = SerialRunner()
     private val queue = ArrayDeque<Op>()
-    private val deferredWrites = ArrayDeque<Op.Write>()
+    private val deferredOps = ArrayDeque<Op>()
     private val opLog = GattOpLog()
     private var inFlight: Op? = null
     private var timeoutToken = 0
@@ -47,6 +49,7 @@ class GattSession internal constructor(
     private var strapNotifiesRequested = !deferProprietaryNotifies
     private var strapNotifiesQueued = false
     private var mtuSettled = false
+    private var discoveredCharacteristics: Set<UUID> = emptySet()
 
     @Volatile
     var phase: SessionPhase = SessionPhase.IDLE
@@ -64,6 +67,25 @@ class GattSession internal constructor(
      */
     @Volatile
     var terminalStatus: Int? = null
+        private set
+
+    /**
+     * True after the Heart Rate Measurement notify descriptor succeeds, or
+     * after a measurement notification has been parsed. The link uses this
+     * with a [RESPONSE_NOTIFY][StrapGatt.RESPONSE_NOTIFY] descriptor timeout
+     * to tell an unfinished bond from a dead radio.
+     */
+    @Volatile
+    var heartRateChannelUp: Boolean = false
+        private set
+
+    /**
+     * True when the [StrapGatt.RESPONSE_NOTIFY] descriptor timed out while
+     * [heartRateChannelUp] was already true. The session still closes. The
+     * link treats that pair as "not bonded" and shows pairing help.
+     */
+    @Volatile
+    var proprietaryUnbonded: Boolean = false
         private set
 
     private val heartRateOut = MutableSharedFlow<LiveHeartRate>(
@@ -97,6 +119,11 @@ class GattSession internal constructor(
                 runner.execute { handleCharacteristicWrite(status) }
             }
 
+            override fun onCharacteristicRead(characteristic: UUID, status: Int, value: ByteArray) {
+                val copy = value.copyOf()
+                runner.execute { handleRead(characteristic, status, copy) }
+            }
+
             override fun onNotification(characteristic: UUID, value: ByteArray) {
                 val copy = value.copyOf()
                 runner.execute { handleNotification(characteristic, copy) }
@@ -115,8 +142,21 @@ class GattSession internal constructor(
      */
     fun write(characteristic: UUID, value: ByteArray, withResponse: Boolean = true) {
         val payload = value.copyOf()
-        runner.execute { enqueueWrite(Op.Write(characteristic, payload, withResponse)) }
+        runner.execute { enqueue(Op.Write(characteristic, payload, withResponse)) }
     }
+
+    /**
+     * Queue a characteristic read. Reads before the session is ready wait
+     * until the notify descriptors are in place. A read that fails to start,
+     * or that completes with an error, does not close the session: Device
+     * Information and Battery Level are optional.
+     */
+    fun read(characteristic: UUID) {
+        runner.execute { enqueue(Op.Read(characteristic)) }
+    }
+
+    /** True when the last successful discovery included [characteristic]. */
+    fun knows(characteristic: UUID): Boolean = discoveredCharacteristics.contains(characteristic)
 
     /**
      * Queue the proprietary notify descriptors. Heart Rate Measurement does
@@ -145,9 +185,9 @@ class GattSession internal constructor(
         launch(Op.Connect(address))
     }
 
-    private fun enqueueWrite(op: Op.Write) {
+    private fun enqueue(op: Op) {
         when (phase) {
-            SessionPhase.OPENING -> deferredWrites.add(op)
+            SessionPhase.OPENING -> deferredOps.add(op)
             SessionPhase.READY -> {
                 queue.add(op)
                 pump()
@@ -163,7 +203,7 @@ class GattSession internal constructor(
         if (phase == SessionPhase.CLOSED || phase == SessionPhase.CLOSING || phase == SessionPhase.IDLE) {
             return
         }
-        deferredWrites.clear()
+        deferredOps.clear()
         queue.clear()
         closeReason = reason
         phase = SessionPhase.CLOSING
@@ -196,6 +236,16 @@ class GattSession internal constructor(
             is Op.Write -> {
                 if (!radio.writeCharacteristic(op.characteristic, op.value, op.withResponse)) {
                     fail(GattStatus.START_FAILED)
+                }
+            }
+            is Op.Read -> {
+                if (!radio.readCharacteristic(op.characteristic)) {
+                    val characteristic = op.characteristic
+                    clearInFlight(GattStatus.START_FAILED)
+                    if (phase != SessionPhase.CLOSED) {
+                        events.onReadFinished(characteristic, GattStatus.START_FAILED, ByteArray(0))
+                        pump()
+                    }
                 }
             }
             is Op.Disconnect -> {
@@ -242,7 +292,7 @@ class GattSession internal constructor(
             else -> {
                 if (inFlight != null) clearInFlight(status.ifZero(GattStatus.LINK_DROPPED))
                 queue.clear()
-                deferredWrites.clear()
+                deferredOps.clear()
                 closeRadio(closeReason ?: CloseReason.LINK_LOST)
             }
         }
@@ -268,6 +318,7 @@ class GattSession internal constructor(
             abandon()
             return
         }
+        discoveredCharacteristics = discovered.characteristics
         clearInFlight(GattStatus.SUCCESS)
         if (heartRateDiscovered(discovered)) {
             queue.add(Op.SetNotify(StrapGatt.HEART_RATE_MEASUREMENT))
@@ -313,6 +364,9 @@ class GattSession internal constructor(
             abandon()
             return
         }
+        if (op.characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
+            heartRateChannelUp = true
+        }
         clearInFlight(GattStatus.SUCCESS)
         if (phase == SessionPhase.CLOSING) {
             pump()
@@ -322,8 +376,8 @@ class GattSession internal constructor(
         if (subscriptionsDone && !readyNotified) {
             readyNotified = true
             phase = SessionPhase.READY
-            queue.addAll(deferredWrites)
-            deferredWrites.clear()
+            queue.addAll(deferredOps)
+            deferredOps.clear()
             val mtu = negotiatedMtu
             try {
                 events.onReady(mtu)
@@ -345,6 +399,17 @@ class GattSession internal constructor(
         pump()
     }
 
+    private fun handleRead(characteristic: UUID, status: Int, value: ByteArray) {
+        if (phase == SessionPhase.CLOSED) return
+        val op = inFlight as? Op.Read ?: return
+        if (op.characteristic != characteristic) return
+        clearInFlight(status)
+        if (phase != SessionPhase.CLOSED) {
+            events.onReadFinished(characteristic, status, value)
+            pump()
+        }
+    }
+
     private fun handleNotification(characteristic: UUID, value: ByteArray) {
         if (phase == SessionPhase.CLOSED || phase == SessionPhase.IDLE) return
         opLog.mark("NOTIFY $characteristic bytes=${value.size}")
@@ -352,6 +417,7 @@ class GattSession internal constructor(
         if (characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
             val sample = StandardHeartRateParser.parse(value, nowMillis())
             if (sample != null) {
+                heartRateChannelUp = true
                 heartRateOut.tryEmit(sample)
             }
         }
@@ -372,7 +438,7 @@ class GattSession internal constructor(
     private fun abandon() {
         if (phase == SessionPhase.CLOSED) return
         queue.clear()
-        deferredWrites.clear()
+        deferredOps.clear()
         val reason = closeReason ?: CloseReason.FAILED
         closeReason = reason
         if (!connected) {
@@ -385,9 +451,15 @@ class GattSession internal constructor(
 
     private fun onTimeout(token: Int, op: Op) {
         if (token != timeoutToken || inFlight !== op || phase == SessionPhase.CLOSED) return
+        if (op is Op.Cccd &&
+            op.characteristic == StrapGatt.RESPONSE_NOTIFY &&
+            heartRateChannelUp
+        ) {
+            proprietaryUnbonded = true
+        }
         clearInFlight(GattStatus.TIMEOUT)
         queue.clear()
-        deferredWrites.clear()
+        deferredOps.clear()
         // The in-flight call never came back. close() releases the client
         // without queueing another operation on top of the stuck one.
         closeRadio(CloseReason.TIMED_OUT)
@@ -402,7 +474,7 @@ class GattSession internal constructor(
         timeoutToken += 1
         inFlight = null
         queue.clear()
-        deferredWrites.clear()
+        deferredOps.clear()
         try {
             radio.close()
         } finally {
@@ -426,8 +498,16 @@ class GattSession internal constructor(
     private fun arm(op: Op) {
         alarm?.cancel()
         val token = ++timeoutToken
-        alarm = alarms.after(opTimeoutMs) {
+        alarm = alarms.after(timeoutFor(op)) {
             runner.execute { onTimeout(token, op) }
+        }
+    }
+
+    private fun timeoutFor(op: Op): Long {
+        return if (op is Op.Cccd && op.characteristic == StrapGatt.RESPONSE_NOTIFY) {
+            proprietaryCccdTimeoutMs
+        } else {
+            opTimeoutMs
         }
     }
 
@@ -462,6 +542,10 @@ class GattSession internal constructor(
             override val name: String = "write:$characteristic"
         }
 
+        data class Read(val characteristic: UUID) : Op {
+            override val name: String = "read:$characteristic"
+        }
+
         data object Disconnect : Op {
             override val name: String = "disconnect"
         }
@@ -469,6 +553,9 @@ class GattSession internal constructor(
 
     companion object {
         const val OP_TIMEOUT_MS: Long = 10_000
+
+        /** Tell-tale for a proprietary response descriptor that never completes. */
+        const val PROPRIETARY_CCCD_TIMEOUT_MS: Long = 5_000
     }
 }
 

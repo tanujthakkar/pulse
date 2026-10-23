@@ -111,6 +111,7 @@ fun ConnectRoute(
         linkPanel = linkPanel,
         onRetryLink = viewModel::retryLink,
         onStopLink = viewModel::stopLink,
+        onRepairLink = viewModel::repairLink,
     )
 }
 
