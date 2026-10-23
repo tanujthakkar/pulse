@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kover)
 }
 
 kotlin {
@@ -65,6 +66,22 @@ tasks.register("checkWireIsPureJvm") {
     }
 }
 
+kover {
+    reports {
+        filters {
+            includes {
+                classes("app.pulse.wire.codec.*")
+            }
+        }
+        verify {
+            rule {
+                minBound(90)
+            }
+        }
+    }
+}
+
 tasks.named("check") {
     dependsOn("checkWireIsPureJvm")
+    dependsOn("koverVerify")
 }

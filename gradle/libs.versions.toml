@@ -11,6 +11,7 @@ lifecycle = "2.8.7"
 core = "1.15.0"
 junit = "5.11.4"
 junitPlatform = "1.11.4"
+kover = "0.9.1"
 coroutines = "1.10.2"
 compileSdk = "35"
 minSdk = "31"
@@ -38,6 +39,7 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }

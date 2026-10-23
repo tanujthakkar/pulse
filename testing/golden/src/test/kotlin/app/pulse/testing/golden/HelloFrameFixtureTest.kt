@@ -1,5 +1,6 @@
 package app.pulse.testing.golden
 
+import app.pulse.wire.codec.HelloCommand
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -10,6 +11,14 @@ class HelloFrameFixtureTest {
         val text = resource("/frames/hello-command.hex")
         val compact = text.trim().split(Regex("\\s+")).joinToString("")
         assertEquals("AA0108000001E67123019101363E5C8D", compact)
+    }
+
+    @Test
+    fun documentedHelloBuilderMatchesLockedBytes() {
+        val text = resource("/frames/hello-command.hex")
+        val expected = text.trim().split(Regex("\\s+")).joinToString("")
+        val actual = HelloCommand.bytes().joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+        assertEquals(expected, actual)
     }
 
     @Test
