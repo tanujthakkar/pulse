@@ -20,6 +20,9 @@ fun ConnectScreen(
     onOpenSettings: () -> Unit,
     onEnableBluetooth: () -> Unit,
     modifier: Modifier = Modifier,
+    linkPanel: LinkPanel? = null,
+    onRetryLink: () -> Unit = {},
+    onStopLink: () -> Unit = {},
 ) {
     when (ui) {
         ConnectUi.Checking -> Column(
@@ -85,12 +88,24 @@ fun ConnectScreen(
                 Text(stringResource(R.string.connect_enable_bluetooth))
             }
         }
-        ConnectUi.Ready -> GateColumn(
-            title = stringResource(R.string.connect_title),
-            body = stringResource(R.string.connect_body),
-            tag = "connect_ready",
-            modifier = modifier,
-        ) {}
+        ConnectUi.Ready -> {
+            val panel = linkPanel
+            if (panel == null) {
+                GateColumn(
+                    title = stringResource(R.string.connect_title),
+                    body = stringResource(R.string.connect_body),
+                    tag = "connect_ready",
+                    modifier = modifier,
+                ) {}
+            } else {
+                LinkPanelContent(
+                    panel = panel,
+                    onRetry = onRetryLink,
+                    onStop = onStopLink,
+                    modifier = modifier,
+                )
+            }
+        }
     }
 }
 

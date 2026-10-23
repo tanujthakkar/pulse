@@ -22,7 +22,7 @@ class ConnectRouteTest {
 
     @Test
     fun grantPathShowsConnectBody() {
-        val vm = ConnectViewModel(Memory(), MutableProbe(granted(33, bluetoothEnabled = true)))
+        val vm = ConnectViewModel(Memory(), MutableProbe(granted(33, bluetoothEnabled = true)), quietLink())
         compose.setContent {
             MaterialTheme {
                 ConnectRoute(
@@ -33,7 +33,7 @@ class ConnectRouteTest {
                 )
             }
         }
-        compose.onNodeWithText("Pairing and connection will live here.").assertIsDisplayed()
+        compose.onNodeWithText("Looking for a strap.").assertIsDisplayed()
         compose.onNodeWithText("Open settings").assertDoesNotExist()
         compose.onNodeWithText("Turn on Bluetooth").assertDoesNotExist()
     }
@@ -41,7 +41,7 @@ class ConnectRouteTest {
     @Test
     fun freshInstallRequestsScanConnectAndNotifications() {
         val requested = mutableListOf<List<String>>()
-        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(33)))
+        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(33)), quietLink())
         compose.setContent {
             MaterialTheme {
                 ConnectRoute(
@@ -68,7 +68,7 @@ class ConnectRouteTest {
     @Test
     fun freshInstallOnAndroid12DoesNotRequestNotifications() {
         val requested = mutableListOf<List<String>>()
-        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(31)))
+        val vm = ConnectViewModel(Memory(), MutableProbe(fresh(31)), quietLink())
         compose.setContent {
             MaterialTheme {
                 ConnectRoute(
@@ -95,6 +95,7 @@ class ConnectRouteTest {
         val vm = ConnectViewModel(
             memory,
             MutableProbe(fresh(33)),
+            quietLink(),
         )
         compose.setContent {
             MaterialTheme {
@@ -121,6 +122,7 @@ class ConnectRouteTest {
         val vm = ConnectViewModel(
             Memory(),
             MutableProbe(fresh(33).copy(rationale = LinkPermission.requiredFor(33).toSet())),
+            quietLink(),
         )
         compose.setContent {
             MaterialTheme {
@@ -143,7 +145,7 @@ class ConnectRouteTest {
     @Test
     fun bluetoothOffShowsEnablePrompt() {
         var prompted = false
-        val vm = ConnectViewModel(Memory(), MutableProbe(granted(34, bluetoothEnabled = false)))
+        val vm = ConnectViewModel(Memory(), MutableProbe(granted(34, bluetoothEnabled = false)), quietLink())
         compose.setContent {
             MaterialTheme {
                 ConnectRoute(

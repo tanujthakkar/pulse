@@ -44,6 +44,16 @@ class GattSession internal constructor(
     var closeReason: CloseReason? = null
         private set
 
+    /**
+     * Status of the operation that ended the session, when that status was not
+     * success. A requested disconnect leaves this null. [SessionEvents.onClosed]
+     * runs after the value is published, so a caller can tell an encryption
+     * refusal from a generic failure.
+     */
+    @Volatile
+    var terminalStatus: Int? = null
+        private set
+
     init {
         radio.listener = object : RadioListener {
             override fun onConnectionState(status: Int, connected: Boolean) {
@@ -351,6 +361,7 @@ class GattSession internal constructor(
         alarm?.cancel()
         timeoutToken += 1
         inFlight = null
+        if (status != GattStatus.SUCCESS) terminalStatus = status
         opLog.end(op.name, status)
         log.log("END ${op.name} status=$status")
     }

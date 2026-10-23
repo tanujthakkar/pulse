@@ -26,4 +26,12 @@ object BleClients {
             log = OpLogger { line -> Log.i(LOG_TAG, line) },
         )
     }
+
+    fun bondController(context: Context, events: BondEvents): BondController {
+        val appContext = context.applicationContext
+        return BondController(
+            port = AndroidBondPort(appContext),
+            events = events,
+        )
+    }
 }

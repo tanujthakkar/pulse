@@ -16,11 +16,17 @@ import androidx.test.espresso.intent.Intents
 import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.espresso.intent.matcher.IntentMatchers.hasData
 import androidx.test.platform.app.InstrumentationRegistry
+import app.pulse.ble.BondBegin
+import app.pulse.ble.DeviceBond
 import app.pulse.feature.connect.ConnectBindings
 import app.pulse.feature.connect.LinkPermission
 import app.pulse.feature.connect.PermissionPromptMemory
 import app.pulse.feature.connect.RadioProbe
 import app.pulse.feature.connect.RadioSnapshot
+import app.pulse.link.LinkAlarm
+import app.pulse.link.LinkClock
+import app.pulse.link.LinkPorts
+import app.pulse.link.StrapLink
 import dagger.hilt.android.testing.BindValue
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -40,7 +46,7 @@ import org.junit.runners.model.Statement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 
 @HiltAndroidTest
-@UninstallModules(ConnectBindings::class)
+@UninstallModules(ConnectBindings::class, LinkBindings::class)
 @RunWith(AndroidJUnit4::class)
 class ConnectPathInstrumentedTest {
     private val hiltRule = HiltAndroidRule(this)
@@ -61,6 +67,10 @@ class ConnectPathInstrumentedTest {
     @JvmField
     val permissionPromptMemory: PermissionPromptMemory = EmptyPermissionMemory()
 
+    @BindValue
+    @JvmField
+    val strapLink: StrapLink = quietStrapLink()
+
     @Before
     fun inject() {
         hiltRule.inject()
@@ -68,7 +78,7 @@ class ConnectPathInstrumentedTest {
 
     @Test
     fun grantPathShowsConnectBody() {
-        composeRule.onNodeWithText("Pairing and connection will live here.").assertIsDisplayed()
+        composeRule.onNodeWithText("Looking for a strap.").assertIsDisplayed()
         composeRule.onNodeWithText("Open settings").assertDoesNotExist()
         composeRule.onNodeWithText("Turn on Bluetooth").assertDoesNotExist()
     }
@@ -181,4 +191,25 @@ private fun bluetoothOffSnapshot() = RadioSnapshot(
     granted = LinkPermission.requiredFor(33).toSet(),
     rationale = emptySet(),
     bluetoothEnabled = false,
+)
+
+private fun quietStrapLink(): StrapLink = StrapLink(
+    ports = object : LinkPorts {
+        override fun startScan() = Unit
+
+        override fun stopScan() = Unit
+
+        override fun bondOf(address: String): DeviceBond = DeviceBond.ABSENT
+
+        override fun beginBond(address: String): BondBegin = BondBegin.NOT_STARTED
+
+        override fun cancelBond() = Unit
+
+        override fun openSession(address: String) = Unit
+
+        override fun closeSession() = Unit
+    },
+    clock = object : LinkClock {
+        override fun after(delayMs: Long, task: () -> Unit): LinkAlarm = LinkAlarm { }
+    },
 )

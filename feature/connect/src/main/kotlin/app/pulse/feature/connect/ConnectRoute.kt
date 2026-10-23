@@ -9,7 +9,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.core.content.ContextCompat
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -17,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -25,7 +25,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 /**
  * Connect destination hosted by the app navigation graph.
  *
- * The pairing body is composed only when the required grants are held and
+ * The strap link is composed only when the required grants are held and
  * Bluetooth is on. Callers can replace the platform launches in tests.
  */
 @Composable
@@ -84,6 +84,7 @@ fun ConnectRoute(
     }
 
     val ui by viewModel.ui.collectAsState()
+    val linkPanel by viewModel.linkPanel.collectAsState()
     val launchRequest = requestPermissions ?: { permissionLauncher.launch(it) }
     val launchSettings = openSettings ?: {
         activity.startActivity(applicationSettingsIntent(activity.packageName))
@@ -107,6 +108,9 @@ fun ConnectRoute(
         },
         onOpenSettings = launchSettings,
         onEnableBluetooth = launchEnable,
+        linkPanel = linkPanel,
+        onRetryLink = viewModel::retryLink,
+        onStopLink = viewModel::stopLink,
     )
 }
 

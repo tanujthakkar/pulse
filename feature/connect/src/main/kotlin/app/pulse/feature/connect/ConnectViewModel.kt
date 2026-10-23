@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.lifecycle.ViewModel
 import app.pulse.data.DataBuildInfo
 import app.pulse.link.LinkBuildInfo
+import app.pulse.link.StrapLink
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,21 +12,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Gates the Connect destination on runtime grants and the Bluetooth radio.
- *
- * Pairing itself is a later milestone. This model only decides which gate
- * screen is showing.
+ * Gates Connect on runtime grants and the Bluetooth radio, then runs
+ * [StrapLink] once pairing is allowed to start.
  */
 @HiltViewModel
 class ConnectViewModel @Inject constructor(
     private val memory: PermissionPromptMemory,
     private val probe: RadioProbe,
+    private val link: StrapLink,
 ) : ViewModel() {
     private val _ui = MutableStateFlow<ConnectUi>(ConnectUi.Checking)
     val ui: StateFlow<ConnectUi> = _ui.asStateFlow()
 
+    private val _linkPanel = MutableStateFlow(LinkPanel.from(link.snapshot()))
+    val linkPanel: StateFlow<LinkPanel> = _linkPanel.asStateFlow()
+
     /** Keeps the link and data modules on the Connect classpath. */
     val modulePins: String = "${LinkBuildInfo.SPEC}:${DataBuildInfo.SPEC}"
+
+    init {
+        link.watch { _linkPanel.value = LinkPanel.from(it) }
+    }
 
     fun refresh(activity: Activity) {
         publish(probe.read(activity))
@@ -53,7 +60,27 @@ class ConnectViewModel @Inject constructor(
         publish(snapshot.copy(granted = granted))
     }
 
+    fun retryLink() {
+        link.retry()
+    }
+
+    fun stopLink() {
+        link.stop()
+    }
+
     internal fun publish(snapshot: RadioSnapshot) {
-        _ui.value = ConnectGatePolicy.evaluate(snapshot, memory.prompted())
+        val next = ConnectGatePolicy.evaluate(snapshot, memory.prompted())
+        val wasReady = _ui.value == ConnectUi.Ready
+        _ui.value = next
+        if (next == ConnectUi.Ready) {
+            if (!wasReady) link.start()
+        } else {
+            link.stop()
+        }
+    }
+
+    override fun onCleared() {
+        link.stop()
+        super.onCleared()
     }
 }
