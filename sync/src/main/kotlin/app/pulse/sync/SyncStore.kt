@@ -13,11 +13,16 @@ interface SyncStore {
      * [startedUnixSeconds] is Unix seconds UTC. [startedSubsecondTicks] is the
      * strap clock fraction in units of 1/32768 s when command 147 supplied one,
      * and null when the phone does not have that fraction.
+     *
+     * [rangeSnapshot] is the 65-byte data-range body. The store keeps a copy on
+     * the session and does not parse it. Any other length is rejected and no
+     * session row is written.
      */
     fun openSession(
         deviceAddress: String,
         startedUnixSeconds: Long,
         startedSubsecondTicks: Int?,
+        rangeSnapshot: ByteArray,
     ): Long
 
     /**
@@ -37,6 +42,31 @@ interface SyncStore {
         archived: List<RawFrameDraft>,
         token: ByteArray,
     ): ChunkReceipt
+
+    /**
+     * Records the end of an attempt.
+     *
+     * [endedUnixSeconds] is Unix seconds UTC. [endedSubsecondTicks] is a
+     * 1/32768 s fraction when the caller has one for that instant, and null
+     * when the end is only a phone-second timestamp.
+     */
+    fun closeSession(
+        sessionId: Long,
+        endedUnixSeconds: Long,
+        endedSubsecondTicks: Int?,
+    )
+
+    /**
+     * Records that an acknowledgement for [token] was handed to the link.
+     *
+     * The token is the original 8 bytes. This does not send the acknowledgement.
+     * A missing chunk leaves the store unchanged.
+     */
+    fun markAcknowledged(
+        sessionId: Long,
+        token: ByteArray,
+        ackedUnixSeconds: Long,
+    )
 }
 
 /** End-token length from spec §8. */

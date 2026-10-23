@@ -7,6 +7,7 @@ import app.pulse.sync.SyncClock
 import app.pulse.sync.toR18Draft
 import app.pulse.sync.toRawFrameDraft
 import app.pulse.wire.codec.Crc32IsoHdlc
+import app.pulse.wire.codec.DataRangeCommand
 import app.pulse.wire.codec.FrameCodec
 import app.pulse.wire.codec.HeaderWord
 import app.pulse.wire.codec.HistoryRecord
@@ -98,7 +99,9 @@ class R18ChunkCommitTest {
         assertEquals(-50f, hidden.stored.skinTempRaw.toShort().toInt() / 100f)
 
         val store = RoomSyncStore(database, clock = SyncClock { STORED_AT })
-        val session = store.openSession(ADDRESS, UNIX, null)
+        val range = ByteArray(DataRangeCommand.BODY_BYTES) { 3 }
+        val session = store.openSession(ADDRESS, UNIX, null, range)
+        assertArrayEquals(range, database.sessions().find(session)?.rangeSnapshot)
         val receipt = store.commitChunk(
             sessionId = session,
             frames = listOf(shown.toRawFrameDraft(), hidden.toRawFrameDraft()),

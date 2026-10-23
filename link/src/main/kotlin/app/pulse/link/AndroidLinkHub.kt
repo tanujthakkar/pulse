@@ -38,6 +38,7 @@ internal class AndroidLinkHub(
     private val context: Context,
     private val heartRate: LiveHeartRateFeed,
     private val devices: DeviceDirectory,
+    private val commands: StrapCommandPort,
 ) : LinkPorts {
     private var link: StrapLink? = null
     private var session: GattSession? = null
@@ -109,6 +110,7 @@ internal class AndroidLinkHub(
     }
 
     override fun closeSession() {
+        commands.markDown()
         dropFeed()
         handshake?.stop()
         handshake = null
@@ -123,6 +125,7 @@ internal class AndroidLinkHub(
             SessionReuse.REUSE, SessionReuse.REUSE_AND_READY -> return
             SessionReuse.REPLACE -> Unit
         }
+        commands.markDown()
         dropFeed()
         handshake?.stop()
         handshake = null
@@ -142,6 +145,7 @@ internal class AndroidLinkHub(
                     val active = opened.session ?: return
                     if (session !== active) return
                     handshake?.onNotification(characteristic, value)
+                    commands.deliver(characteristic.toString(), value)
                 }
 
                 override fun onWriteFinished(characteristic: UUID, status: Int) {
@@ -159,6 +163,7 @@ internal class AndroidLinkHub(
                 override fun onClosed(reason: CloseReason) {
                     val active = opened.session ?: return
                     if (session !== active) return
+                    commands.markDown()
                     handshake?.stop()
                     handshake = null
                     session = null
@@ -184,6 +189,7 @@ internal class AndroidLinkHub(
     private fun startHandshake(active: GattSession) {
         if (handshake != null) return
         val target = sessionAddress ?: return
+        commands.bind { bytes -> active.write(StrapGatt.COMMAND, bytes, withResponse = true) }
         val created = StrapHandshake(
             address = target,
             knows = active::knows,
@@ -194,7 +200,12 @@ internal class AndroidLinkHub(
             heartRateLive = {
                 active.heartRateChannelUp || active.heartRate.replayCache.isNotEmpty()
             },
-            report = { update -> link?.onDeviceReport(update) },
+            report = { update ->
+                if (update.settled) {
+                    if (update.succeeded) commands.markReady(target) else commands.markUnready()
+                }
+                link?.onDeviceReport(update)
+            },
             log = { line -> Log.i(BleClients.LOG_TAG, line) },
         )
         handshake = created
@@ -225,13 +236,15 @@ internal class AndroidLinkHub(
 class LinkAssembly(
     val strapLink: StrapLink,
     val heartRate: LiveHeartRateFeed,
+    val commands: StrapCommandPort,
 )
 
 object StrapLinks {
     fun create(context: Context, devices: DeviceDirectory): LinkAssembly {
         val appContext = context.applicationContext
         val heartRate = LiveHeartRateFeed()
-        val hub = AndroidLinkHub(appContext, heartRate, devices)
+        val commands = StrapCommandPort()
+        val hub = AndroidLinkHub(appContext, heartRate, devices, commands)
         val link = StrapLink(
             ports = hub,
             clock = SystemLinkClock(),
@@ -239,7 +252,7 @@ object StrapLinks {
             log = { line -> Log.i(BleClients.LOG_TAG, line) },
         )
         hub.attach(link)
-        return LinkAssembly(link, heartRate)
+        return LinkAssembly(link, heartRate, commands)
     }
 
     private fun mainExecutor(): (block: () -> Unit) -> Unit {

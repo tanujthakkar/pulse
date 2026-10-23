@@ -15,6 +15,12 @@ interface SyncSessionDao {
 
     @Query("SELECT COUNT(*) FROM sync_session")
     fun count(): Int
+
+    @Query(
+        "UPDATE sync_session SET ended_unix_seconds = :endedUnixSeconds, " +
+            "ended_subsecond_ticks = :endedSubsecondTicks WHERE id = :id",
+    )
+    fun close(id: Long, endedUnixSeconds: Long, endedSubsecondTicks: Int?)
 }
 
 @Dao
@@ -27,6 +33,13 @@ interface SyncChunkDao {
 
     @Query("SELECT COUNT(*) FROM sync_chunk")
     fun count(): Int
+
+    @Query(
+        "UPDATE sync_chunk SET acked_at = :ackedAt " +
+            "WHERE device_id = (SELECT device_id FROM sync_session WHERE id = :sessionId) " +
+            "AND token = :token",
+    )
+    fun markAcked(sessionId: Long, token: ByteArray, ackedAt: Long): Int
 }
 
 @Dao

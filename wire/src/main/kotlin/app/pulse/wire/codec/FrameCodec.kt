@@ -22,6 +22,18 @@ object HeaderWord {
 object PacketType {
     const val COMMAND: Int = 35
     const val COMMAND_RESPONSE: Int = 36
+
+    /** Historical record. Layout byte at offset 9. Spec §6. */
+    const val HISTORY_RECORD: Int = 47
+
+    /** Event. Event number at byte 10. Spec §6. */
+    const val EVENT: Int = 48
+
+    /** History metadata: start, end, or complete. Spec §8. */
+    const val HISTORY_METADATA: Int = 49
+
+    /** Console log text. Spec §6. */
+    const val CONSOLE: Int = 50
 }
 
 internal object FrameBytes {

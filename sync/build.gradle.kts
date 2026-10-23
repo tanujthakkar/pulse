@@ -15,6 +15,7 @@ java {
 
 dependencies {
     implementation(project(":wire"))
+    testImplementation(project(":testing:fakestrap"))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
 }

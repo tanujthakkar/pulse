@@ -20,7 +20,11 @@ object DataBindings {
         // thread. Sync commits go through RoomSyncStore, which does not use
         // this shortcut.
         return Room.databaseBuilder(context, PulseDatabase::class.java, "pulse.db")
-            .addMigrations(PulseMigrations.FROM_1_TO_2, PulseMigrations.FROM_2_TO_3)
+            .addMigrations(
+                PulseMigrations.FROM_1_TO_2,
+                PulseMigrations.FROM_2_TO_3,
+                PulseMigrations.FROM_3_TO_4,
+            )
             .allowMainThreadQueries()
             .build()
     }
