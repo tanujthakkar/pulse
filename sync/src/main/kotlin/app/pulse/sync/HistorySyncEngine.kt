@@ -28,8 +28,9 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Sequence, from spec §7, §8, and project rules 6–11: clock get, clock set
  * when the strap is more than [HistoryLimits.CLOCK_DRIFT_SECONDS] from the
- * phone, clock get again, data range, open a session, history start with an
- * explicit `00`, then metadata and records. Each metadata end is committed
+ * phone, clock get again, data range, open a session with that 65-byte
+ * snapshot, history start with an explicit `00`, then metadata and records.
+ * Each metadata end is committed
  * and only then acknowledged. The acknowledgement body is `01` plus the
  * original token bytes.
  *
@@ -218,7 +219,7 @@ class HistorySyncEngine(
             return
         }
         val id = try {
-            store.openSession(address, seconds, strapTicks)
+            store.openSession(address, seconds, strapTicks, snapshot)
         } catch (error: Exception) {
             fail(SessionOutcome.ABORTED)
             return

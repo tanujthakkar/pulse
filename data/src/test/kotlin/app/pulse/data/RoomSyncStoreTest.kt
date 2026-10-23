@@ -14,6 +14,8 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import org.junit.After
+import app.pulse.wire.codec.DataRangeCommand
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -62,7 +64,7 @@ class RoomSyncStoreTest {
     @Test
     fun failureMidTransactionLeavesNoRowsFromThatChunk() {
         val store = RoomSyncStore(database, clock = clock)
-        val session = store.openSession(ADDRESS, STARTED_AT, 32)
+        val session = store.openSession(ADDRESS, STARTED_AT, 32, snapshot())
         val prior = store.commitChunk(
             sessionId = session,
             frames = listOf(RawFrameDraft(byteArrayOf(1, 2, 3), packetType = 47)),
@@ -107,7 +109,7 @@ class RoomSyncStoreTest {
     @Test
     fun duplicateTokenAndRepeatedRowsAreNoOps() {
         val store = RoomSyncStore(database, clock = clock)
-        val session = store.openSession(ADDRESS, STARTED_AT, null)
+        val session = store.openSession(ADDRESS, STARTED_AT, null, snapshot())
         var threadName = ""
         val recording = RoomSyncStore(
             database,
@@ -191,7 +193,7 @@ class RoomSyncStoreTest {
     @Test
     fun closeAndMarkAcknowledgedAreSeparateFromCommit() {
         val store = RoomSyncStore(database, clock = clock)
-        val session = store.openSession(ADDRESS, STARTED_AT, 32)
+        val session = store.openSession(ADDRESS, STARTED_AT, 32, snapshot())
         val committed = store.commitChunk(
             sessionId = session,
             frames = emptyList(),
@@ -208,7 +210,30 @@ class RoomSyncStoreTest {
         val closed = read { database.sessions().find(session) }
         assertEquals(ENDED_AT, closed?.endedUnixSeconds)
         assertNull(closed?.endedSubsecondTicks)
+        assertArrayEquals(snapshot(), closed?.rangeSnapshot)
         assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
+    fun openSessionStoresTheSixtyFiveByteRangeSnapshot() {
+        val store = RoomSyncStore(database, clock = clock)
+        val body = snapshot()
+        val session = store.openSession(ADDRESS, STARTED_AT, 32, body)
+        body[0] = 9
+        val stored = read { database.sessions().find(session) }
+        assertEquals(DataRangeCommand.BODY_BYTES, stored?.rangeSnapshot?.size)
+        assertArrayEquals(snapshot(), stored?.rangeSnapshot)
+        assertEquals(STARTED_AT, stored?.startedUnixSeconds)
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            store.openSession(ADDRESS, STARTED_AT, 32, ByteArray(DataRangeCommand.BODY_BYTES - 1))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            store.openSession(ADDRESS, STARTED_AT, 32, ByteArray(DataRangeCommand.BODY_BYTES + 1))
+        }
+        assertEquals(1, read { database.sessions().count() })
     }
 
     @Test
@@ -259,6 +284,10 @@ class RoomSyncStoreTest {
 
     private fun token(mark: Int): ByteArray = ByteArray(8) { mark.toByte() }
 
+    private fun snapshot(): ByteArray = ByteArray(DataRangeCommand.BODY_BYTES) { index ->
+        if (index == 0) 1 else index.toByte()
+    }
+
     private companion object {
         const val ADDRESS: String = "AA:BB:CC:DD:EE:FF"
         const val STARTED_AT: Long = 1_700_000_000L
@@ -302,7 +331,11 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME)
-            .addMigrations(PulseMigrations.FROM_1_TO_2, PulseMigrations.FROM_2_TO_3)
+            .addMigrations(
+                PulseMigrations.FROM_1_TO_2,
+                PulseMigrations.FROM_2_TO_3,
+                PulseMigrations.FROM_3_TO_4,
+            )
             .allowMainThreadQueries()
             .build()
         val stored = room.devices().latest()
@@ -360,7 +393,7 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V2)
-            .addMigrations(PulseMigrations.FROM_2_TO_3)
+            .addMigrations(PulseMigrations.FROM_2_TO_3, PulseMigrations.FROM_3_TO_4)
             .allowMainThreadQueries()
             .build()
         val sample = room.samples().find("AA:BB:CC:DD:EE:FF", 3, 100)
@@ -371,9 +404,60 @@ class DeviceSchemaMigrationTest {
         room.close()
     }
 
+    @Test
+    fun version3SessionKeepsItsTimesAndLeavesTheRangeEmpty() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(NAME_V3)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(NAME_V3)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(3) {
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            db.execSQL(DEVICE_V1)
+                            PulseMigrations.FROM_1_TO_2.migrate(db)
+                            PulseMigrations.FROM_2_TO_3.migrate(db)
+                        }
+
+                        override fun onUpgrade(
+                            db: SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                )
+                .build(),
+        )
+        helper.writableDatabase.execSQL(
+            "INSERT INTO `device` (`address`, `helloFirmware`, `informationFirmware`, " +
+                "`commandBatteryPercent`, `serviceBatteryPercent`, `updatedAtMillis`) " +
+                "VALUES ('AA:BB:CC:DD:EE:FF', '50.42.1.0', NULL, 80, 81, 11)",
+        )
+        helper.writableDatabase.execSQL(
+            "INSERT INTO `sync_session` (`device_id`, `started_unix_seconds`, " +
+                "`started_subsecond_ticks`, `ended_unix_seconds`, `ended_subsecond_ticks`) " +
+                "VALUES ('AA:BB:CC:DD:EE:FF', 1700000000, 32, NULL, NULL)",
+        )
+        helper.close()
+
+        val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V3)
+            .addMigrations(PulseMigrations.FROM_3_TO_4)
+            .allowMainThreadQueries()
+            .build()
+        val session = room.sessions().find(1)
+        assertEquals(1_700_000_000L, session?.startedUnixSeconds)
+        assertEquals(32, session?.startedSubsecondTicks)
+        assertNull(session?.endedUnixSeconds)
+        assertNull(session?.rangeSnapshot)
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+        room.close()
+    }
+
     private companion object {
         const val NAME: String = "pulse-migrate.db"
         const val NAME_V2: String = "pulse-migrate-v2.db"
+        const val NAME_V3: String = "pulse-migrate-v3.db"
         const val DEVICE_V1: String =
             "CREATE TABLE IF NOT EXISTS `device` (" +
                 "`address` TEXT NOT NULL, " +

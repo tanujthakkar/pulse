@@ -7,6 +7,7 @@ import app.pulse.sync.RawFrameDraft
 import app.pulse.sync.SyncClock
 import app.pulse.sync.SyncStore
 import app.pulse.wire.ProtocolSpecVersion
+import app.pulse.wire.codec.DataRangeCommand
 import java.security.MessageDigest
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
@@ -35,7 +36,12 @@ class RoomSyncStore(
         deviceAddress: String,
         startedUnixSeconds: Long,
         startedSubsecondTicks: Int?,
+        rangeSnapshot: ByteArray,
     ): Long = onIo {
+        val snapshot = rangeSnapshot.copyOf()
+        require(snapshot.size == DataRangeCommand.BODY_BYTES) {
+            "data range snapshot is ${DataRangeCommand.BODY_BYTES} bytes"
+        }
         database.sessions().insert(
             SyncSessionRow(
                 deviceId = deviceAddress,
@@ -43,6 +49,7 @@ class RoomSyncStore(
                 startedSubsecondTicks = startedSubsecondTicks,
                 endedUnixSeconds = null,
                 endedSubsecondTicks = null,
+                rangeSnapshot = snapshot,
             ),
         )
     }

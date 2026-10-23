@@ -1,5 +1,6 @@
 package app.pulse.sync
 
+import app.pulse.wire.codec.DataRangeCommand
 import java.security.MessageDigest
 
 /** In-memory [SyncStore] with the same token, frame, and sample identity rules as Room. */
@@ -15,13 +16,18 @@ class MemorySyncStore : SyncStore {
         deviceAddress: String,
         startedUnixSeconds: Long,
         startedSubsecondTicks: Int?,
+        rangeSnapshot: ByteArray,
     ): Long {
+        require(rangeSnapshot.size == DataRangeCommand.BODY_BYTES) {
+            "data range snapshot is ${DataRangeCommand.BODY_BYTES} bytes"
+        }
         val id = nextId++
         sessions += MemorySession(
             id = id,
             device = deviceAddress,
             startedUnixSeconds = startedUnixSeconds,
             startedSubsecondTicks = startedSubsecondTicks,
+            rangeSnapshot = rangeSnapshot.copyOf(),
         )
         return id
     }
@@ -106,6 +112,7 @@ class MemorySession(
     val device: String,
     val startedUnixSeconds: Long,
     val startedSubsecondTicks: Int?,
+    val rangeSnapshot: ByteArray,
     var endedUnixSeconds: Long? = null,
     var endedSubsecondTicks: Int? = null,
 )

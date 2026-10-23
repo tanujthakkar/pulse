@@ -7,9 +7,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Opens an older database onto the current sync schema.
  *
  * Version 1 is the device row only. Version 2 adds the sync tables. Version 3
- * adds `r18_sample.decoder_version`. The device table is not rewritten.
- * Existing layout-18 rows gain decoder version 0, meaning they were stored
- * before a decoder stamped them. New commits write the decoder's own version.
+ * adds `r18_sample.decoder_version`. Version 4 adds
+ * `sync_session.range_snapshot`, the 65-byte data-range body. The device table
+ * is not rewritten. Existing layout-18 rows gain decoder version 0, meaning
+ * they were stored before a decoder stamped them. New commits write the
+ * decoder's own version. Sessions opened before version 4 keep a null
+ * snapshot; that is not a captured range.
  */
 object PulseMigrations {
     val FROM_1_TO_2: Migration = object : Migration(1, 2) {
@@ -23,6 +26,12 @@ object PulseMigrations {
             db.execSQL(
                 "ALTER TABLE `r18_sample` ADD COLUMN `decoder_version` INTEGER NOT NULL DEFAULT 0",
             )
+        }
+    }
+
+    val FROM_3_TO_4: Migration = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `sync_session` ADD COLUMN `range_snapshot` BLOB")
         }
     }
 }

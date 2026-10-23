@@ -10,7 +10,9 @@ import androidx.room.PrimaryKey
  * One history attempt for a strap.
  *
  * Times are Unix seconds UTC plus the strap's 1/32768 s fraction when the
- * clock read included it.
+ * clock read included it. [rangeSnapshot] is the 65-byte data-range body
+ * stored when the attempt opened. It is null only for a session written
+ * before that column existed.
  */
 @Entity(
     tableName = "sync_session",
@@ -33,6 +35,7 @@ data class SyncSessionRow(
     @ColumnInfo(name = "started_subsecond_ticks") val startedSubsecondTicks: Int?,
     @ColumnInfo(name = "ended_unix_seconds") val endedUnixSeconds: Long?,
     @ColumnInfo(name = "ended_subsecond_ticks") val endedSubsecondTicks: Int?,
+    @ColumnInfo(name = "range_snapshot") val rangeSnapshot: ByteArray?,
 )
 
 /**

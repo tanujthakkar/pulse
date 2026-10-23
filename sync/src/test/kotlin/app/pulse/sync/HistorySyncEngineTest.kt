@@ -42,6 +42,8 @@ class HistorySyncEngineTest {
         assertEquals(listOf(147, 146, 147, 34, 22), sentCommands(run.engine))
         assertArrayEquals(byteArrayOf(0), sentBody(run.engine, 22))
         assertArrayEquals(script.range, run.engine.rangeSnapshot)
+        assertArrayEquals(script.range, store.sessions.single().rangeSnapshot)
+        assertEquals(DataRangeCommand.BODY_BYTES, store.sessions.single().rangeSnapshot.size)
         assertEquals(PHONE, store.sessions.single().startedUnixSeconds)
         assertEquals(PHONE_TICKS, store.sessions.single().startedSubsecondTicks)
         assertEquals(PHONE, store.sessions.single().endedUnixSeconds)

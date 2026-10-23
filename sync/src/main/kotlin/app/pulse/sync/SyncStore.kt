@@ -13,11 +13,16 @@ interface SyncStore {
      * [startedUnixSeconds] is Unix seconds UTC. [startedSubsecondTicks] is the
      * strap clock fraction in units of 1/32768 s when command 147 supplied one,
      * and null when the phone does not have that fraction.
+     *
+     * [rangeSnapshot] is the 65-byte data-range body. The store keeps a copy on
+     * the session and does not parse it. Any other length is rejected and no
+     * session row is written.
      */
     fun openSession(
         deviceAddress: String,
         startedUnixSeconds: Long,
         startedSubsecondTicks: Int?,
+        rangeSnapshot: ByteArray,
     ): Long
 
     /**

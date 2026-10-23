@@ -42,7 +42,7 @@ interface DeviceDao {
         R18SampleRow::class,
         DeviceBatteryRow::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class PulseDatabase : RoomDatabase() {
