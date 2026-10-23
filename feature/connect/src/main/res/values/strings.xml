@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connect_title">Connect</string>
+    <string name="connect_body">Pairing and connection will live here.</string>
+    <string name="connect_permission_title">Allow Bluetooth</string>
+    <string name="connect_permission_body">Pulse needs permission to scan for and connect to your strap.</string>
+    <string name="connect_permission_body_notifications">Pulse needs permission to scan for and connect to your strap. It also needs permission to post a notification while the strap is connected.</string>
+    <string name="connect_permission_continue">Continue</string>
+    <string name="connect_rationale_title">Bluetooth permission is off</string>
+    <string name="connect_rationale_body">Pulse cannot connect until Bluetooth scanning and connection are allowed. Open settings and grant those permissions for this app.</string>
+    <string name="connect_rationale_body_notifications">Pulse cannot connect until Bluetooth scanning, connection, and notifications are allowed. Open settings and grant those permissions for this app.</string>
+    <string name="connect_open_settings">Open settings</string>
+    <string name="connect_try_again">Try again</string>
+    <string name="connect_bluetooth_off_title">Bluetooth is off</string>
+    <string name="connect_bluetooth_off_body">Turn Bluetooth on to connect to your strap.</string>
+    <string name="connect_enable_bluetooth">Turn on Bluetooth</string>
+</resources>

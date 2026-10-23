@@ -50,6 +50,7 @@ fun PulseNavHost() {
             startDestination = PulseRoute.Connect.route,
             modifier = Modifier.padding(padding),
         ) {
+            // ConnectRoute stays on the gate until grants are held and Bluetooth is on.
             composable(PulseRoute.Connect.route) { ConnectRoute() }
             composable(PulseRoute.Live.route) { LiveRoute() }
             composable(PulseRoute.Sync.route) { SyncRoute() }

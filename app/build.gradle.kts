@@ -17,6 +17,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "app.pulse.PulseTestRunner"
     }
     buildFeatures {
         compose = true
@@ -60,6 +61,14 @@ dependencies {
 
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.espresso.intents)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
 }
 
 androidComponents {
@@ -77,11 +86,35 @@ androidComponents {
                 }
             }
         }
+        tasks.register("check${capital}ManifestHasNoLocation") {
+            group = "verification"
+            description = "Fail if the ${variant.name} merged manifest declares a location permission."
+            inputs.file(merged)
+            doLast {
+                val manifest = merged.get().asFile
+                val text = manifest.readText()
+                val forbidden = listOf(
+                    "android.permission.ACCESS_FINE_LOCATION",
+                    "android.permission.ACCESS_COARSE_LOCATION",
+                ).filter { text.contains(it) }
+                if (forbidden.isNotEmpty()) {
+                    throw GradleException(
+                        "Location permission is forbidden in $manifest: $forbidden",
+                    )
+                }
+                if (!text.contains("neverForLocation")) {
+                    throw GradleException(
+                        "BLUETOOTH_SCAN must set neverForLocation in $manifest",
+                    )
+                }
+            }
+        }
     }
 }
 
 afterEvaluate {
     tasks.named("check").configure {
         dependsOn(tasks.matching { it.name.endsWith("ManifestHasNoInternet") })
+        dependsOn(tasks.matching { it.name.endsWith("ManifestHasNoLocation") })
     }
 }
