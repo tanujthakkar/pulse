@@ -35,6 +35,7 @@ class GattSession internal constructor(
     private val proprietaryCccdTimeoutMs: Long = PROPRIETARY_CCCD_TIMEOUT_MS,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     deferProprietaryNotifies: Boolean = false,
+    private val frameTap: FrameTap? = null,
 ) {
     private val runner = SerialRunner()
     private val queue = ArrayDeque<Op>()
@@ -234,6 +235,7 @@ class GattSession internal constructor(
                 if (!radio.writeCccd(op.characteristic, payload)) fail(GattStatus.START_FAILED)
             }
             is Op.Write -> {
+                trace(incoming = false, op.characteristic, op.value)
                 if (!radio.writeCharacteristic(op.characteristic, op.value, op.withResponse)) {
                     fail(GattStatus.START_FAILED)
                 }
@@ -412,6 +414,7 @@ class GattSession internal constructor(
 
     private fun handleNotification(characteristic: UUID, value: ByteArray) {
         if (phase == SessionPhase.CLOSED || phase == SessionPhase.IDLE) return
+        trace(incoming = true, characteristic, value)
         opLog.mark("NOTIFY $characteristic bytes=${value.size}")
         log.log("NOTIFY $characteristic bytes=${value.size}")
         if (characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
@@ -500,6 +503,19 @@ class GattSession internal constructor(
         val token = ++timeoutToken
         alarm = alarms.after(timeoutFor(op)) {
             runner.execute { onTimeout(token, op) }
+        }
+    }
+
+    /**
+     * Debug observation only. A failure here must not skip the write or the
+     * notification that follows, including a history acknowledgement.
+     */
+    private fun trace(incoming: Boolean, characteristic: UUID, value: ByteArray) {
+        val tap = frameTap ?: return
+        try {
+            tap.onPayload(incoming, characteristic, value, nowMillis())
+        } catch (_: RuntimeException) {
+            log.log("frame tap failed")
         }
     }
 

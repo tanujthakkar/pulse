@@ -14,6 +14,8 @@ import app.pulse.ble.SessionEvents
 import app.pulse.ble.StrapGatt
 import app.pulse.ble.StrapSighting
 import app.pulse.data.DeviceDirectory
+import app.pulse.wire.codec.FrameIntake
+import app.pulse.wire.codec.FrameRing
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,7 @@ internal class AndroidLinkHub(
     private val heartRate: LiveHeartRateFeed,
     private val devices: DeviceDirectory,
     private val commands: StrapCommandPort,
+    private val frames: FrameRing,
 ) : LinkPorts {
     private var link: StrapLink? = null
     private var session: GattSession? = null
@@ -131,6 +134,7 @@ internal class AndroidLinkHub(
         handshake = null
         val previous = session
         val opened = SessionSlot()
+        val intake = FrameIntake(frames)
         val created = BleClients.gattSession(
             context,
             object : SessionEvents {
@@ -177,6 +181,7 @@ internal class AndroidLinkHub(
                 }
             },
             deferProprietaryNotifies = true,
+            frameTap = sessionFrameTap(intake),
         )
         opened.session = created
         session = created
@@ -237,6 +242,7 @@ class LinkAssembly(
     val strapLink: StrapLink,
     val heartRate: LiveHeartRateFeed,
     val commands: StrapCommandPort,
+    val frames: FrameRing,
 )
 
 object StrapLinks {
@@ -244,7 +250,8 @@ object StrapLinks {
         val appContext = context.applicationContext
         val heartRate = LiveHeartRateFeed()
         val commands = StrapCommandPort()
-        val hub = AndroidLinkHub(appContext, heartRate, devices, commands)
+        val frames = FrameRing()
+        val hub = AndroidLinkHub(appContext, heartRate, devices, commands, frames)
         val link = StrapLink(
             ports = hub,
             clock = SystemLinkClock(),
@@ -252,7 +259,7 @@ object StrapLinks {
             log = { line -> Log.i(BleClients.LOG_TAG, line) },
         )
         hub.attach(link)
-        return LinkAssembly(link, heartRate, commands)
+        return LinkAssembly(link, heartRate, commands, frames)
     }
 
     private fun mainExecutor(): (block: () -> Unit) -> Unit {

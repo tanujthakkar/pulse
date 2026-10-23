@@ -3,7 +3,11 @@ package app.pulse.wire.codec
 sealed class AccumulatorEvent {
     class Frame(val frame: WireFrame) : AccumulatorEvent()
 
-    class Rejected(val reason: RejectReason) : AccumulatorEvent()
+    /**
+     * [bytes] is a copy of the candidate that was dropped, when the scan had
+     * one. A start-byte skip leaves it null.
+     */
+    class Rejected(val reason: RejectReason, val bytes: ByteArray? = null) : AccumulatorEvent()
 }
 
 /**
@@ -89,8 +93,9 @@ class FrameAccumulator(
             val total = declared + 8
             val sizeReject = rejectSize(declared, total)
             if (sizeReject != null) {
+                val sample = data.copyOfRange(start, minOf(start + 4, end))
                 start += 1
-                events.add(AccumulatorEvent.Rejected(sizeReject))
+                events.add(AccumulatorEvent.Rejected(sizeReject, sample))
                 continue
             }
             if (available < 8) {
@@ -99,8 +104,9 @@ class FrameAccumulator(
             val storedHeader = readU16Le(data, start + 6)
             val actualHeader = Crc16Modbus.compute(data, start, 6)
             if (storedHeader != actualHeader) {
+                val sample = data.copyOfRange(start, minOf(start + 8, end))
                 start += 1
-                events.add(AccumulatorEvent.Rejected(RejectReason.BAD_HEADER_CRC))
+                events.add(AccumulatorEvent.Rejected(RejectReason.BAD_HEADER_CRC, sample))
                 continue
             }
             if (available < total) {
@@ -114,7 +120,7 @@ class FrameAccumulator(
                 }
                 is DecodeResult.Rejected -> {
                     start += total
-                    events.add(AccumulatorEvent.Rejected(decoded.reason))
+                    events.add(AccumulatorEvent.Rejected(decoded.reason, slice))
                 }
             }
         }
