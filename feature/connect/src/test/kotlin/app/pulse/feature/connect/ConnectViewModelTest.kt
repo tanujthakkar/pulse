@@ -1,5 +1,7 @@
 package app.pulse.feature.connect
 
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import app.pulse.ble.BondBegin
 import app.pulse.ble.DeviceBond
 import app.pulse.ble.StrapSighting
@@ -143,6 +145,32 @@ class ConnectViewModelTest {
 
         vm.publish(granted)
         assertEquals(LinkPhase.IDLE, link.snapshot().phase)
+    }
+
+    @Test
+    fun clearingTheConnectScreenDoesNotDropTheLink() {
+        val ports = RecordingPorts()
+        val link = StrapLink(ports, RecordingClock())
+        val granted = granted(33, bluetoothEnabled = true)
+        val vm = ConnectViewModel(Memory(), MutableProbe(granted), link)
+        vm.publish(granted)
+        assertEquals(LinkPhase.SCANNING, link.snapshot().phase)
+
+        val store = ViewModelStore()
+        val provider = ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return vm as T
+                }
+            },
+        )
+        assertEquals(vm, provider[ConnectViewModel::class.java])
+        store.clear()
+
+        assertEquals(LinkPhase.SCANNING, link.snapshot().phase)
+        assertEquals(1, ports.scans)
     }
 
     private fun fresh(sdk: Int) = RadioSnapshot(

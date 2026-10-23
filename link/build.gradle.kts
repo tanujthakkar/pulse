@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt)
 }
 
 android {
@@ -18,6 +20,7 @@ android {
         checkReleaseBuilds = false
     }
     testOptions {
+        unitTests.isIncludeAndroidResources = true
         unitTests.all { it.useJUnitPlatform() }
     }
 }
@@ -32,7 +35,14 @@ dependencies {
     implementation(project(":ble"))
     implementation(project(":wire"))
     implementation(project(":data"))
+    implementation(project(":sync"))
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit4)
     testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

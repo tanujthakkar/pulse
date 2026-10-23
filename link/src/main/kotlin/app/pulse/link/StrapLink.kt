@@ -77,6 +77,10 @@ class StrapLink(
         }
     }
 
+    fun unwatch(listener: (LinkSnapshot) -> Unit) {
+        onState { listeners.remove(listener) }
+    }
+
     fun start() = onState {
         if (phase != LinkPhase.IDLE) return@onState
         resetBudget()

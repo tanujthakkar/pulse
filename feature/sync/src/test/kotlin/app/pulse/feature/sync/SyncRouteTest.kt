@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import app.pulse.link.HistorySyncHost
 import app.pulse.link.StrapCommandPort
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.PhoneTime
@@ -34,7 +35,7 @@ class SyncRouteTest {
 
     @Test
     fun syncNowWithoutALinkShowsTheNoticeAndLeavesTheButtonEnabled() {
-        val viewModel = SyncViewModel(UnusedSyncStore(), StrapCommandPort())
+        val viewModel = SyncViewModel(HistorySyncHost(StrapCommandPort(), UnusedSyncStore()))
         compose.setContent { SyncRoute(viewModel) }
         compose.onNodeWithTag("sync_state").assertTextEquals("Idle")
         compose.onNodeWithTag("sync_chunks").assertTextEquals("0")
