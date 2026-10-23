@@ -3,11 +3,15 @@ package app.pulse.sync
 import app.pulse.wire.codec.HistoryAckGate
 
 /**
- * Manual "Sync now" entry. Full sync status is a later screen.
+ * Manual "Sync now" entry.
+ *
+ * [status] stays a single line for the attempt. [activity] is the live session
+ * view: phase, chunk and record counts, and the last outcome with its time.
  *
  * Production leaves [ackEnabled] on [HistoryAckGate.maySend], which stays
  * false until a Pulse capture confirms the metadata offsets. The engine still
- * runs the clock, range, and history-start steps.
+ * runs the clock, range, and history-start steps. This driver does not open
+ * that gate.
  */
 class HistorySyncDriver(
     private val link: HistoryLink,
@@ -24,17 +28,22 @@ class HistorySyncDriver(
     var running: Boolean = false
         private set
 
+    var activity: SyncActivity = SyncActivity()
+        private set
+
     var onChange: () -> Unit = {}
 
     private var engine: HistorySyncEngine? = null
     private var subscription: HistorySubscription? = null
     private var alarm: HistorySubscription? = null
+    private var latest: SyncSnapshot = SyncSnapshot(SyncPhase.IDLE, 0, 0, null)
 
     fun syncNow() {
         if (running) return
         val address = link.address
         if (address.isNullOrBlank()) {
             status = "Link a strap before syncing."
+            activity = activity.copy(blocked = status, running = false)
             onChange()
             return
         }
@@ -47,10 +56,19 @@ class HistorySyncDriver(
             nowMs = nowMs,
             onFinished = { outcome -> finish(outcome) },
             onStreamPulse = { armWatchdog() },
+            onProgress = { snap -> noteProgress(snap) },
         )
         engine = created
         running = true
         status = "Syncing"
+        latest = SyncSnapshot(SyncPhase.CLOCK, 0, 0, null)
+        activity = activity.copy(
+            phase = SyncPhase.CLOCK,
+            running = true,
+            chunks = 0,
+            records = 0,
+            blocked = null,
+        )
         subscription = link.listen(
             onNotification = { source, bytes -> created.onNotification(source, bytes) },
             onDown = { created.onDisconnect() },
@@ -69,8 +87,22 @@ class HistorySyncDriver(
         }
     }
 
+    private fun noteProgress(snap: SyncSnapshot) {
+        latest = snap
+        if (!running || snap.outcome != null) return
+        activity = activity.copy(
+            phase = snap.phase,
+            running = true,
+            chunks = snap.chunks,
+            records = snap.records,
+            blocked = null,
+        )
+        onChange()
+    }
+
     private fun finish(outcome: SessionOutcome) {
         if (!running) return
+        val snap = latest
         running = false
         alarm?.cancel()
         alarm = null
@@ -81,6 +113,15 @@ class HistorySyncDriver(
             SessionOutcome.COMPLETE -> "Sync finished."
             else -> "Sync stopped."
         }
+        activity = SyncActivity(
+            phase = SyncPhase.DONE,
+            running = false,
+            chunks = snap.chunks,
+            records = snap.records,
+            outcome = outcome,
+            finishedAt = phone.now(),
+            blocked = null,
+        )
         log("sync closed $outcome")
         onChange()
     }

@@ -23,6 +23,9 @@ android {
         abortOnError = true
         checkReleaseBuilds = false
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 kotlin {
@@ -43,4 +46,11 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
+
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
 }
