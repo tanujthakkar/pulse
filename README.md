@@ -2,14 +2,16 @@
 
 Pulse is a local-only Android companion for a WHOOP 5.0 strap the user already owns. The display name is Pulse. Nothing in this app is sent off the phone: the manifest has no `INTERNET` permission, and CI fails if one is added.
 
-Milestone 1 includes the project skeleton and the format-1 frame codec in `:wire`:
+Milestone 1 includes the project skeleton, the format-1 frame codec in `:wire`, and the BLE scanner and GATT session in `:ble`:
 
 - Gradle skeleton (Kotlin 2.1, Jetpack Compose Material 3, Hilt, minSdk 31, compile/target SDK 35)
 - Modules `:wire` (pure JVM), `:ble`, `:link`, `:sync`, `:data`, `:metrics`, `:feature:connect`, `:feature:live`, `:feature:sync`, `:feature:debug`, `:app`, `:testing:fakestrap`, `:testing:golden`
 - [`docs/protocol-spec.md`](docs/protocol-spec.md) v0, with a source, firmware, and confidence on every fact
 - Clean-room rules in [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
-`:wire` encodes and decodes format-1 frames, reassembles split notifications, correlates command replies (including a pending result), and builds the documented client hello. Screens are still placeholders. BLE, bonding, sync, and the deny-list sender are later work.
+`:wire` encodes and decodes format-1 frames, reassembles split notifications, correlates command replies (including a pending result), and builds the documented client hello. `:ble` scans for service `fd4b0001-cce1-4033-93ce-002d5875f58a` and runs one GATT operation at a time: connect, discover, MTU 247, notify subscriptions, notifications, and a disconnect that closes the client. Screens are still placeholders. Bonding, live heart rate, the hello handshake, and sync are later work.
+
+Strap-in-hand checks for this transport are in [`docs/hardware-acceptance.md`](docs/hardware-acceptance.md).
 
 ## Check
 
