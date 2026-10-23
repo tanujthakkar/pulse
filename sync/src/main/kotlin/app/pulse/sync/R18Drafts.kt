@@ -6,8 +6,8 @@ import app.pulse.wire.codec.HistoryRecord
  * Maps a decoded layout-18 record onto the draft [SyncStore.commitChunk] stores.
  *
  * Layout 18 documents Unix seconds only, so [R18Draft.subsecondTicks] is null.
- * The decoder version stays on [HistoryRecord.Layout18]; the sample table has
- * no column for it.
+ * [R18Draft.decoderVersion] is the version on this result. The current decoder
+ * stamps [app.pulse.wire.codec.HistoryRecordDecoder.VERSION].
  */
 fun HistoryRecord.Layout18.toR18Draft(): R18Draft {
     val source = stored
@@ -44,6 +44,7 @@ fun HistoryRecord.Layout18.toR18Draft(): R18Draft {
         sleepAdjacentRaw = source.sleepAdjacentRaw,
         crc32 = source.crc32,
         raw = source.raw.copyOf(),
+        decoderVersion = decoderVersion,
     )
 }
 

@@ -122,7 +122,8 @@ data class RawFrameRow(
  * The primary key is `(device_id, record_index, unix_s)`. The record index at
  * frame offset 11 is not a timestamp. [unixSeconds] is Unix seconds UTC.
  * Typed columns sit beside the raw companions from spec §9. [raw] is the
- * record bytes the caller supplied.
+ * record bytes the caller supplied. [decoderVersion] is the decoder that
+ * produced the row. Rows written before that column existed migrate as 0.
  */
 @Entity(
     tableName = "r18_sample",
@@ -191,6 +192,7 @@ data class R18SampleRow(
     @ColumnInfo(name = "sleep_adjacent_raw") val sleepAdjacentRaw: Int,
     val crc32: Long,
     val raw: ByteArray,
+    @ColumnInfo(name = "decoder_version", defaultValue = "0") val decoderVersion: Int,
 )
 
 /**

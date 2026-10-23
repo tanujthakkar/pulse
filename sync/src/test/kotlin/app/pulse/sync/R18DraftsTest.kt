@@ -72,6 +72,13 @@ class R18DraftsTest {
         val draft = decoded.toR18Draft()
 
         assertEquals(HistoryRecordDecoder.VERSION, decoded.decoderVersion)
+        assertEquals(HistoryRecordDecoder.VERSION, draft.decoderVersion)
+        assertEquals(
+            4,
+            HistoryRecord.Layout18(decoderVersion = 4, reading = reading, stored = stored)
+                .toR18Draft()
+                .decoderVersion,
+        )
         assertEquals(reading.recordIndex, draft.recordIndex)
         assertEquals(reading.unixSeconds, draft.unixSeconds)
         assertNull(draft.subsecondTicks)

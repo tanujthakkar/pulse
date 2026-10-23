@@ -112,6 +112,7 @@ class R18ChunkCommitTest {
         assertEquals(1, receipt.archivedInserted)
 
         val row = database.samples().find(ADDRESS, 7, UNIX)
+        assertEquals(HistoryRecordDecoder.VERSION, row?.decoderVersion)
         assertEquals(72, row?.heartRateBpm)
         assertEquals(72, row?.heartRateRaw)
         assertEquals(36.5f, row?.skinTempC)
@@ -128,6 +129,7 @@ class R18ChunkCommitTest {
         assertEquals(Crc32IsoHdlc.compute(shown.stored.raw, 8, 112), row?.crc32)
 
         val unavailable = database.samples().find(ADDRESS, 8, UNIX)
+        assertEquals(HistoryRecordDecoder.VERSION, unavailable?.decoderVersion)
         assertNull(unavailable?.heartRateBpm)
         assertEquals(10, unavailable?.heartRateRaw)
         assertNull(unavailable?.skinTempC)

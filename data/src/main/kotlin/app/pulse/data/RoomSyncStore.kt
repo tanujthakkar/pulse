@@ -249,6 +249,7 @@ private fun R18Draft.toRow(deviceId: String, chunkId: Long): R18SampleRow {
         sleepAdjacentRaw = sleepAdjacentRaw,
         crc32 = crc32,
         raw = raw.copyOf(),
+        decoderVersion = decoderVersion,
     )
 }
 
