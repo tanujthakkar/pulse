@@ -315,6 +315,106 @@ class GattSessionTest {
     }
 
     @Test
+    fun heartRateIsSubscribedBeforeMtuAndParsedBeforeReady() {
+        val fixture = SessionFixture(nowMillis = { 1_700_000_000_123L })
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE, StrapGatt.HEART_RATE_SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet() +
+                setOf(StrapGatt.COMMAND, StrapGatt.HEART_RATE_MEASUREMENT),
+        )
+
+        val hr = StrapGatt.HEART_RATE_MEASUREMENT
+        assertEquals(
+            listOf("connect", "discover", "setNotify:$hr:true", "cccd:$hr"),
+            fixture.radio.started,
+        )
+        assertTrue(fixture.session.heartRate.replayCache.isEmpty())
+
+        fixture.radio.succeedCccd()
+        assertEquals("requestMtu", fixture.radio.started.last())
+        assertNull(fixture.events.readyMtu)
+
+        // flags 0x16: u8 HR, contact detected, R-R present. 72 bpm, 1024 ticks -> 1000 ms.
+        fixture.radio.emit(hr, byteArrayOf(0x16, 0x48, 0x00, 0x04))
+        val sample = fixture.session.heartRate.replayCache.single()
+        assertEquals(1_700_000_000_123L, sample.tsMillis)
+        assertEquals(72, sample.bpm)
+        assertEquals(listOf(1000), sample.rrMs)
+        assertEquals(SensorContact.DETECTED, sample.contact)
+        assertNull(fixture.events.readyMtu)
+
+        fixture.radio.emit(hr, byteArrayOf(0x00))
+        fixture.radio.emit(StrapGatt.RESPONSE_NOTIFY, byteArrayOf(0x10, 0x48, 0x00, 0x04))
+        assertEquals(1, fixture.session.heartRate.replayCache.size)
+        assertEquals(72, fixture.session.heartRate.replayCache.single().bpm)
+
+        fixture.radio.succeedMtu(247)
+        repeat(StrapGatt.NOTIFY.size) { fixture.radio.succeedCccd() }
+        assertEquals(247, fixture.events.readyMtu)
+        assertEquals(5, fixture.radio.cccdWrites.size)
+        assertEquals(hr, fixture.radio.cccdWrites.first().first)
+        assertSerialized(fixture.session.opLogSnapshot())
+    }
+
+    @Test
+    fun deferredProprietaryNotifiesLeaveHeartRateFlowing() {
+        val fixture = SessionFixture(nowMillis = { 5L }, deferProprietaryNotifies = true)
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE, StrapGatt.HEART_RATE_SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet() + StrapGatt.HEART_RATE_MEASUREMENT,
+        )
+        fixture.radio.succeedCccd()
+        fixture.radio.succeedMtu(185)
+        assertTrue(fixture.radio.started.none { it.startsWith("setNotify:${StrapGatt.RESPONSE_NOTIFY}") })
+        assertNull(fixture.events.readyMtu)
+
+        fixture.radio.emit(StrapGatt.HEART_RATE_MEASUREMENT, byteArrayOf(0x00, 0x3C))
+        assertEquals(60, fixture.session.heartRate.replayCache.single().bpm)
+        assertEquals(5L, fixture.session.heartRate.replayCache.single().tsMillis)
+
+        fixture.session.subscribeStrapNotifies()
+        assertTrue(fixture.radio.started.any { it.startsWith("setNotify:${StrapGatt.RESPONSE_NOTIFY}") })
+        repeat(StrapGatt.NOTIFY.size) { fixture.radio.succeedCccd() }
+        assertEquals(185, fixture.events.readyMtu)
+        assertSerialized(fixture.session.opLogSnapshot())
+    }
+
+    @Test
+    fun heartRateServiceWithoutMeasurementWaitsForMtu() {
+        val fixture = SessionFixture()
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE, StrapGatt.HEART_RATE_SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet(),
+        )
+        assertEquals("requestMtu", fixture.radio.started.last())
+        assertTrue(fixture.radio.cccdWrites.isEmpty())
+    }
+
+    @Test
+    fun heartRateDescriptorFailureClosesBeforeMtu() {
+        val fixture = SessionFixture()
+        fixture.session.open(STRAP_ADDRESS)
+        fixture.radio.succeedConnect()
+        fixture.radio.succeedDiscover(
+            services = setOf(StrapGatt.SERVICE, StrapGatt.HEART_RATE_SERVICE),
+            characteristics = StrapGatt.NOTIFY.toSet() + StrapGatt.HEART_RATE_MEASUREMENT,
+        )
+        fixture.radio.failCccd(status = 5)
+        fixture.radio.completeDisconnect()
+
+        assertEquals(CloseReason.FAILED, fixture.session.closeReason)
+        assertFalse(fixture.radio.started.contains("requestMtu"))
+        assertEquals(1, fixture.radio.closeCount)
+        assertSerialized(fixture.session.opLogSnapshot())
+    }
+
+    @Test
     fun disconnectBeforeOpenIsANoOp() {
         val fixture = SessionFixture()
         fixture.session.disconnect()

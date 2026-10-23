@@ -15,7 +15,8 @@ import java.util.ArrayDeque
  * or bonding that is still unfinished after [StrapLinkLimits.PAIRING_HELP_AFTER_MS],
  * moves to [LinkPhase.PAIRING_HELP] and stops. A clean failure is retried once
  * ([StrapLinkLimits.BOND_ATTEMPTS], [StrapLinkLimits.CONNECT_ATTEMPTS]) and
- * then stops. Nothing here sends the client hello or reads heart rate.
+ * then stops. The client hello is not sent. Heart Rate Measurement is watched
+ * from the first sighting, including while bonding is still unfinished.
  *
  * Transitions:
  * - Idle → Scanning on [start]
@@ -94,6 +95,7 @@ class StrapLink(
         if (sighting.address.isBlank()) return@onState
         address = sighting.address
         ports.stopScan()
+        ports.watchHeartRate(sighting.address)
         when (ports.bondOf(sighting.address)) {
             DeviceBond.PRESENT -> openSession()
             DeviceBond.BONDING -> waitForBond()

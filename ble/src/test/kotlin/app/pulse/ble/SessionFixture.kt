@@ -31,11 +31,20 @@ internal class RecordingEvents : SessionEvents {
     }
 }
 
-internal class SessionFixture {
+internal class SessionFixture(
+    nowMillis: () -> Long = { 0L },
+    deferProprietaryNotifies: Boolean = false,
+) {
     val radio = FakeGattRadio()
     val clock = ManualAlarmClock()
     val events = RecordingEvents()
-    val session = GattSession(radio, events, clock)
+    val session = GattSession(
+        radio,
+        events,
+        clock,
+        nowMillis = nowMillis,
+        deferProprietaryNotifies = deferProprietaryNotifies,
+    )
 
     init {
         events.radio = radio

@@ -17,13 +17,18 @@ object BleClients {
         return StrapScanner(AndroidScanPort(context.applicationContext), events)
     }
 
-    fun gattSession(context: Context, events: SessionEvents): GattSession {
+    fun gattSession(
+        context: Context,
+        events: SessionEvents,
+        deferProprietaryNotifies: Boolean = false,
+    ): GattSession {
         val appContext = context.applicationContext
         return GattSession(
             radio = AndroidGattRadio(appContext),
             events = events,
             alarms = SystemAlarmClock(),
             log = OpLogger { line -> Log.i(LOG_TAG, line) },
+            deferProprietaryNotifies = deferProprietaryNotifies,
         )
     }
 

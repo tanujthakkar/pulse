@@ -1,27 +1,26 @@
 package app.pulse.feature.live
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
 fun LiveRoute(viewModel: LiveViewModel = hiltViewModel()) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-    ) {
-        Text(text = viewModel.title, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            text = viewModel.body,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(top = 12.dp),
-        )
+    val phase by viewModel.phase.collectAsState()
+    val latest by viewModel.latest.collectAsState()
+    var trace by remember { mutableStateOf<List<Int>>(emptyList()) }
+    LaunchedEffect(latest) {
+        val sample = latest
+        trace = if (sample == null) {
+            emptyList()
+        } else {
+            appendTrace(trace, displayedBpm(sample.bpm))
+        }
     }
+    LiveScreen(ui = liveUi(phase, latest, trace))
 }

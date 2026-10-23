@@ -1,6 +1,8 @@
 package app.pulse
 
 import android.content.Context
+import app.pulse.link.LinkAssembly
+import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapLink
 import app.pulse.link.StrapLinks
 import dagger.Module
@@ -15,5 +17,11 @@ import javax.inject.Singleton
 object LinkBindings {
     @Provides
     @Singleton
-    fun strapLink(@ApplicationContext context: Context): StrapLink = StrapLinks.create(context)
+    fun linkAssembly(@ApplicationContext context: Context): LinkAssembly = StrapLinks.create(context)
+
+    @Provides
+    fun strapLink(assembly: LinkAssembly): StrapLink = assembly.strapLink
+
+    @Provides
+    fun heartRate(assembly: LinkAssembly): LiveHeartRateFeed = assembly.heartRate
 }

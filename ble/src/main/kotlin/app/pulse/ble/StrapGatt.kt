@@ -25,6 +25,15 @@ object StrapGatt {
         EXTRA_NOTIFY,
     )
 
+    /**
+     * Heart Rate Service. Protocol spec §2. Subscribed only when discovery
+     * reports it, and not part of the required proprietary [NOTIFY] set.
+     */
+    val HEART_RATE_SERVICE: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
+
+    /** Heart Rate Measurement. The session writes its notify descriptor as soon as services are discovered. */
+    val HEART_RATE_MEASUREMENT: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+
     /** Client Characteristic Configuration descriptor, Bluetooth SIG base UUID. */
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
