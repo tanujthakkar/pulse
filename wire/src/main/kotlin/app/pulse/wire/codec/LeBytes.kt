@@ -21,3 +21,9 @@ internal fun writeU32Le(bytes: ByteArray, offset: Int, value: Long) {
     bytes[offset + 2] = ((bits ushr 16) and 0xFF).toByte()
     bytes[offset + 3] = ((bits ushr 24) and 0xFF).toByte()
 }
+
+internal fun readI16Le(bytes: ByteArray, offset: Int): Int =
+    readU16Le(bytes, offset).toShort().toInt()
+
+internal fun readF32Le(bytes: ByteArray, offset: Int): Float =
+    Float.fromBits(readU32Le(bytes, offset).toInt())
