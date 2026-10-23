@@ -119,13 +119,14 @@ data class RawFrameRow(
 /**
  * One layout-18 sample.
  *
- * The primary key is the strap address plus the record index at frame offset
- * 11. That index is not a timestamp. Typed columns sit beside the raw
- * companions from spec §9. [raw] is the record bytes the caller supplied.
+ * The primary key is `(device_id, record_index, unix_s)`. The record index at
+ * frame offset 11 is not a timestamp. [unixSeconds] is Unix seconds UTC.
+ * Typed columns sit beside the raw companions from spec §9. [raw] is the
+ * record bytes the caller supplied.
  */
 @Entity(
     tableName = "r18_sample",
-    primaryKeys = ["device_id", "record_index"],
+    primaryKeys = ["device_id", "record_index", "unix_s"],
     foreignKeys = [
         ForeignKey(
             entity = DeviceRow::class,
@@ -148,7 +149,7 @@ data class R18SampleRow(
     @ColumnInfo(name = "device_id") val deviceId: String,
     @ColumnInfo(name = "record_index") val recordIndex: Long,
     @ColumnInfo(name = "chunk_id") val chunkId: Long,
-    @ColumnInfo(name = "unix_seconds") val unixSeconds: Long,
+    @ColumnInfo(name = "unix_s") val unixSeconds: Long,
     @ColumnInfo(name = "subsecond_ticks") val subsecondTicks: Int?,
     @ColumnInfo(name = "heart_rate_bpm") val heartRateBpm: Int?,
     @ColumnInfo(name = "heart_rate_raw") val heartRateRaw: Int,

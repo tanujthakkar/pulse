@@ -50,9 +50,10 @@ interface R18SampleDao {
     fun count(): Int
 
     @Query(
-        "SELECT * FROM r18_sample WHERE device_id = :deviceId AND record_index = :recordIndex",
+        "SELECT * FROM r18_sample WHERE device_id = :deviceId " +
+            "AND record_index = :recordIndex AND unix_s = :unixSeconds",
     )
-    fun find(deviceId: String, recordIndex: Long): R18SampleRow?
+    fun find(deviceId: String, recordIndex: Long, unixSeconds: Long): R18SampleRow?
 }
 
 @Dao

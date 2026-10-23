@@ -98,7 +98,7 @@ class RoomSyncStoreTest {
         assertEquals(1, read { database.frames().count() })
         assertEquals(1, read { database.samples().count() })
         assertNull(read { database.chunks().find(ADDRESS, token(2)) })
-        assertEquals(60, read { database.samples().find(ADDRESS, 1) }?.heartRateRaw)
+        assertEquals(60, read { database.samples().find(ADDRESS, 1, SAMPLE_UNIX) }?.heartRateRaw)
         assertNull(read { database.chunks().find(ADDRESS, token(1)) }?.ackedAt)
         assertFalse(HistoryAckGate.maySend())
         assertEquals(ADDRESS, read { database.devices().latest() }?.address)
@@ -150,8 +150,8 @@ class RoomSyncStoreTest {
         assertEquals(1, read { database.chunks().count() })
         assertEquals(2, read { database.frames().count() })
         assertEquals(1, read { database.samples().count() })
-        assertEquals(70, read { database.samples().find(ADDRESS, 7) }?.heartRateRaw)
-        assertEquals(4, read { database.samples().find(ADDRESS, 7) }?.subsecondTicks)
+        assertEquals(70, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.heartRateRaw)
+        assertEquals(4, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.subsecondTicks)
         val kept = read { database.chunks().find(ADDRESS, token(3)) }
         assertNull(kept?.ackedAt)
         assertEquals(STORED_AT, kept?.storedUnixSeconds)
@@ -171,7 +171,20 @@ class RoomSyncStoreTest {
         assertEquals(2, read { database.chunks().count() })
         assertEquals(2, read { database.frames().count() })
         assertEquals(1, read { database.samples().count() })
-        assertEquals(70, read { database.samples().find(ADDRESS, 7) }?.heartRateRaw)
+        assertEquals(70, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.heartRateRaw)
+
+        val laterSecond = store.commitChunk(
+            sessionId = session,
+            frames = emptyList(),
+            r18Rows = listOf(row.copy(unixSeconds = SAMPLE_UNIX + 1, heartRateRaw = 55, heartRateBpm = 55)),
+            archived = emptyList(),
+            token = token(5),
+        )
+        assertFalse(laterSecond.duplicate)
+        assertEquals(1, laterSecond.samplesInserted)
+        assertEquals(2, read { database.samples().count() })
+        assertEquals(70, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.heartRateRaw)
+        assertEquals(55, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX + 1) }?.heartRateRaw)
     }
 
     @Test
@@ -204,10 +217,11 @@ class RoomSyncStoreTest {
         recordIndex: Long,
         heartRateRaw: Int,
         heartRateBpm: Int? = heartRateRaw,
+        unixSeconds: Long = SAMPLE_UNIX,
     ): R18Draft {
         return R18Draft(
             recordIndex = recordIndex,
-            unixSeconds = 1_700_000_100L,
+            unixSeconds = unixSeconds,
             subsecondTicks = 4,
             heartRateBpm = heartRateBpm,
             heartRateRaw = heartRateRaw,
@@ -225,6 +239,7 @@ class RoomSyncStoreTest {
         const val ADDRESS: String = "AA:BB:CC:DD:EE:FF"
         const val STARTED_AT: Long = 1_700_000_000L
         const val STORED_AT: Long = 1_700_000_010L
+        const val SAMPLE_UNIX: Long = 1_700_000_100L
     }
 }
 

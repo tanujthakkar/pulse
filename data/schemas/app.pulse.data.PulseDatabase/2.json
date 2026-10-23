@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 2,
-    "identityHash": "864de579bce98f2990c0de15fa6e3f1b",
+    "identityHash": "e5eb9b3e3792ba348137357535d68af9",
     "entities": [
       {
         "tableName": "device",
@@ -368,7 +368,7 @@
       },
       {
         "tableName": "r18_sample",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`device_id` TEXT NOT NULL, `record_index` INTEGER NOT NULL, `chunk_id` INTEGER NOT NULL, `unix_seconds` INTEGER NOT NULL, `subsecond_ticks` INTEGER, `heart_rate_bpm` INTEGER, `heart_rate_raw` INTEGER NOT NULL, `rr_count` INTEGER NOT NULL, `rr_tick_0` INTEGER, `rr_tick_1` INTEGER, `rr_tick_2` INTEGER, `rr_tick_3` INTEGER, `rr_block_raw` BLOB NOT NULL, `cardiac_raw` INTEGER NOT NULL, `quality_raw` INTEGER NOT NULL, `alternate_hr_raw` INTEGER NOT NULL, `packed_word_raw` INTEGER NOT NULL, `dynamic_accel` REAL, `dynamic_accel_bits` INTEGER NOT NULL, `axis_accel_0` REAL, `axis_accel_1` REAL, `axis_accel_2` REAL, `axis_accel_0_bits` INTEGER NOT NULL, `axis_accel_1_bits` INTEGER NOT NULL, `axis_accel_2_bits` INTEGER NOT NULL, `step_counter` INTEGER NOT NULL, `cadence_raw` INTEGER NOT NULL, `hardware_counter` INTEGER NOT NULL, `activity_class` INTEGER, `activity_class_raw` INTEGER NOT NULL, `counter_override_raw` INTEGER NOT NULL, `aux_temp_0_c` REAL, `aux_temp_1_c` REAL, `aux_temp_0_raw` INTEGER NOT NULL, `aux_temp_1_raw` INTEGER NOT NULL, `skin_temp_c` REAL, `skin_temp_raw` INTEGER NOT NULL, `status_0_raw` INTEGER NOT NULL, `status_1_raw` INTEGER NOT NULL, `status_2_raw` INTEGER NOT NULL, `motion_raw` INTEGER NOT NULL, `rest_state` INTEGER, `sleep_adjacent_raw` INTEGER NOT NULL, `crc32` INTEGER NOT NULL, `raw` BLOB NOT NULL, PRIMARY KEY(`device_id`, `record_index`), FOREIGN KEY(`device_id`) REFERENCES `device`(`address`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`chunk_id`) REFERENCES `sync_chunk`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`device_id` TEXT NOT NULL, `record_index` INTEGER NOT NULL, `chunk_id` INTEGER NOT NULL, `unix_s` INTEGER NOT NULL, `subsecond_ticks` INTEGER, `heart_rate_bpm` INTEGER, `heart_rate_raw` INTEGER NOT NULL, `rr_count` INTEGER NOT NULL, `rr_tick_0` INTEGER, `rr_tick_1` INTEGER, `rr_tick_2` INTEGER, `rr_tick_3` INTEGER, `rr_block_raw` BLOB NOT NULL, `cardiac_raw` INTEGER NOT NULL, `quality_raw` INTEGER NOT NULL, `alternate_hr_raw` INTEGER NOT NULL, `packed_word_raw` INTEGER NOT NULL, `dynamic_accel` REAL, `dynamic_accel_bits` INTEGER NOT NULL, `axis_accel_0` REAL, `axis_accel_1` REAL, `axis_accel_2` REAL, `axis_accel_0_bits` INTEGER NOT NULL, `axis_accel_1_bits` INTEGER NOT NULL, `axis_accel_2_bits` INTEGER NOT NULL, `step_counter` INTEGER NOT NULL, `cadence_raw` INTEGER NOT NULL, `hardware_counter` INTEGER NOT NULL, `activity_class` INTEGER, `activity_class_raw` INTEGER NOT NULL, `counter_override_raw` INTEGER NOT NULL, `aux_temp_0_c` REAL, `aux_temp_1_c` REAL, `aux_temp_0_raw` INTEGER NOT NULL, `aux_temp_1_raw` INTEGER NOT NULL, `skin_temp_c` REAL, `skin_temp_raw` INTEGER NOT NULL, `status_0_raw` INTEGER NOT NULL, `status_1_raw` INTEGER NOT NULL, `status_2_raw` INTEGER NOT NULL, `motion_raw` INTEGER NOT NULL, `rest_state` INTEGER, `sleep_adjacent_raw` INTEGER NOT NULL, `crc32` INTEGER NOT NULL, `raw` BLOB NOT NULL, PRIMARY KEY(`device_id`, `record_index`, `unix_s`), FOREIGN KEY(`device_id`) REFERENCES `device`(`address`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`chunk_id`) REFERENCES `sync_chunk`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "deviceId",
@@ -390,7 +390,7 @@
           },
           {
             "fieldPath": "unixSeconds",
-            "columnName": "unix_seconds",
+            "columnName": "unix_s",
             "affinity": "INTEGER",
             "notNull": true
           },
@@ -645,7 +645,8 @@
           "autoGenerate": false,
           "columnNames": [
             "device_id",
-            "record_index"
+            "record_index",
+            "unix_s"
           ]
         },
         "indices": [
@@ -784,7 +785,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '864de579bce98f2990c0de15fa6e3f1b')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e5eb9b3e3792ba348137357535d68af9')"
     ]
   }
 }

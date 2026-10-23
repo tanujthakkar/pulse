@@ -44,7 +44,7 @@ private val STATEMENTS: List<String> = listOf(
         "ON `raw_frame` (`device_id`, `sha256`)",
     "CREATE INDEX IF NOT EXISTS `index_raw_frame_chunk_id` ON `raw_frame` (`chunk_id`)",
     "CREATE TABLE IF NOT EXISTS `r18_sample` (`device_id` TEXT NOT NULL, `record_index` INTEGER NOT NULL, " +
-        "`chunk_id` INTEGER NOT NULL, `unix_seconds` INTEGER NOT NULL, `subsecond_ticks` INTEGER, " +
+        "`chunk_id` INTEGER NOT NULL, `unix_s` INTEGER NOT NULL, `subsecond_ticks` INTEGER, " +
         "`heart_rate_bpm` INTEGER, `heart_rate_raw` INTEGER NOT NULL, `rr_count` INTEGER NOT NULL, " +
         "`rr_tick_0` INTEGER, `rr_tick_1` INTEGER, `rr_tick_2` INTEGER, `rr_tick_3` INTEGER, " +
         "`rr_block_raw` BLOB NOT NULL, `cardiac_raw` INTEGER NOT NULL, `quality_raw` INTEGER NOT NULL, " +
@@ -59,7 +59,8 @@ private val STATEMENTS: List<String> = listOf(
         "`aux_temp_1_raw` INTEGER NOT NULL, `skin_temp_c` REAL, `skin_temp_raw` INTEGER NOT NULL, " +
         "`status_0_raw` INTEGER NOT NULL, `status_1_raw` INTEGER NOT NULL, `status_2_raw` INTEGER NOT NULL, " +
         "`motion_raw` INTEGER NOT NULL, `rest_state` INTEGER, `sleep_adjacent_raw` INTEGER NOT NULL, " +
-        "`crc32` INTEGER NOT NULL, `raw` BLOB NOT NULL, PRIMARY KEY(`device_id`, `record_index`), " +
+        "`crc32` INTEGER NOT NULL, `raw` BLOB NOT NULL, " +
+        "PRIMARY KEY(`device_id`, `record_index`, `unix_s`), " +
         "FOREIGN KEY(`device_id`) REFERENCES `device`(`address`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
         "FOREIGN KEY(`chunk_id`) REFERENCES `sync_chunk`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
     "CREATE INDEX IF NOT EXISTS `index_r18_sample_chunk_id` ON `r18_sample` (`chunk_id`)",
