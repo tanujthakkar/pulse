@@ -37,6 +37,31 @@ interface SyncStore {
         archived: List<RawFrameDraft>,
         token: ByteArray,
     ): ChunkReceipt
+
+    /**
+     * Records the end of an attempt.
+     *
+     * [endedUnixSeconds] is Unix seconds UTC. [endedSubsecondTicks] is a
+     * 1/32768 s fraction when the caller has one for that instant, and null
+     * when the end is only a phone-second timestamp.
+     */
+    fun closeSession(
+        sessionId: Long,
+        endedUnixSeconds: Long,
+        endedSubsecondTicks: Int?,
+    )
+
+    /**
+     * Records that an acknowledgement for [token] was handed to the link.
+     *
+     * The token is the original 8 bytes. This does not send the acknowledgement.
+     * A missing chunk leaves the store unchanged.
+     */
+    fun markAcknowledged(
+        sessionId: Long,
+        token: ByteArray,
+        ackedUnixSeconds: Long,
+    )
 }
 
 /** End-token length from spec §8. */

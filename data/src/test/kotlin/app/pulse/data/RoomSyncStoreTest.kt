@@ -189,6 +189,29 @@ class RoomSyncStoreTest {
     }
 
     @Test
+    fun closeAndMarkAcknowledgedAreSeparateFromCommit() {
+        val store = RoomSyncStore(database, clock = clock)
+        val session = store.openSession(ADDRESS, STARTED_AT, 32)
+        val committed = store.commitChunk(
+            sessionId = session,
+            frames = emptyList(),
+            r18Rows = emptyList(),
+            archived = emptyList(),
+            token = token(7),
+        )
+        assertFalse(committed.duplicate)
+        assertNull(read { database.chunks().find(ADDRESS, token(7)) }?.ackedAt)
+        assertNull(read { database.sessions().find(session) }?.endedUnixSeconds)
+        store.markAcknowledged(session, token(7), ACKED_AT)
+        store.closeSession(session, ENDED_AT, null)
+        assertEquals(ACKED_AT, read { database.chunks().find(ADDRESS, token(7)) }?.ackedAt)
+        val closed = read { database.sessions().find(session) }
+        assertEquals(ENDED_AT, closed?.endedUnixSeconds)
+        assertNull(closed?.endedSubsecondTicks)
+        assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
     fun recordsBatteryOffTheCallerThread() {
         val store = RoomSyncStore(database, clock = clock)
         val id = store.recordBattery(
@@ -241,6 +264,8 @@ class RoomSyncStoreTest {
         const val STARTED_AT: Long = 1_700_000_000L
         const val STORED_AT: Long = 1_700_000_010L
         const val SAMPLE_UNIX: Long = 1_700_000_100L
+        const val ACKED_AT: Long = 1_700_000_020L
+        const val ENDED_AT: Long = 1_700_000_030L
     }
 }
 

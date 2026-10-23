@@ -18,8 +18,8 @@ import java.util.concurrent.Executors
  *
  * [commitChunk] runs on [executor], not on the caller thread. The device table may
  * still be read on the main thread; this store does not use that shortcut.
- * [SyncChunkRow.ackedAt] is never written here, and this class does not send
- * a history acknowledgement.
+ * [SyncChunkRow.ackedAt] stays null until [markAcknowledged]. This class does
+ * not send a history acknowledgement.
  *
  * [afterFramesInserted] runs inside the chunk transaction after frame inserts
  * and before samples. Production leaves it empty. Tests use it to fail the
@@ -109,6 +109,29 @@ class RoomSyncStore(
                     duplicate = false,
                 )
             }
+        }
+    }
+
+    override fun closeSession(
+        sessionId: Long,
+        endedUnixSeconds: Long,
+        endedSubsecondTicks: Int?,
+    ) {
+        onIo {
+            database.sessions().close(sessionId, endedUnixSeconds, endedSubsecondTicks)
+        }
+    }
+
+    override fun markAcknowledged(
+        sessionId: Long,
+        token: ByteArray,
+        ackedUnixSeconds: Long,
+    ) {
+        onIo {
+            require(token.size == HISTORY_TOKEN_BYTES) {
+                "history token is $HISTORY_TOKEN_BYTES bytes"
+            }
+            database.chunks().markAcked(sessionId, token.copyOf(), ackedUnixSeconds)
         }
     }
 

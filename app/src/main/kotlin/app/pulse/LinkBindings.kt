@@ -4,6 +4,7 @@ import android.content.Context
 import app.pulse.data.DeviceDirectory
 import app.pulse.link.LinkAssembly
 import app.pulse.link.LiveHeartRateFeed
+import app.pulse.link.StrapCommandPort
 import app.pulse.link.StrapLink
 import app.pulse.link.StrapLinks
 import dagger.Module
@@ -28,4 +29,7 @@ object LinkBindings {
 
     @Provides
     fun heartRate(assembly: LinkAssembly): LiveHeartRateFeed = assembly.heartRate
+
+    @Provides
+    fun strapCommands(assembly: LinkAssembly): StrapCommandPort = assembly.commands
 }

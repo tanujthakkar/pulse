@@ -66,3 +66,15 @@ History acknowledgement stays disabled until the metadata row is checked. A debu
 - [ ] If hello fails and live heart rate still updates, the Live screen keeps bpm and Connect offers **Re-pair**.
 - [ ] Save a scrubbed hello response as `testing/golden/src/main/resources/frames/slots/captured-hello-response.hex`. Zero command-body offsets 14..78 before committing. Do not commit a clear identity block.
 - [ ] Save a scrubbed metadata frame as `testing/golden/src/main/resources/frames/slots/captured-metadata.hex`. Confirm kind at frame byte 10 and the 8-byte token at frame offsets 21..28. Leave this unchecked until that capture exists.
+
+## T10 history sync
+
+`./gradlew check` runs the history engine against a scripted strap. The rows below need a strap the tester owns. Leave them unchecked until that run.
+
+History acknowledgement stays disabled until the metadata row in T7 is checked. A debug flag cannot enable it while the metadata offsets are still unconfirmed. Sync now still runs the clock read, the optional clock set, the data range, and history start. Command 23 is not written to the strap until that capture exists.
+
+Logcat tag: `PulseGatt`. A finished attempt logs `sync closed` and one of `COMPLETE`, `ABORTED`, `DISCONNECTED`, `WATCHDOG`, or `BOUNDED`.
+
+- [ ] Link the strap and tap Sync now. The attempt reaches COMPLETE (`sync closed COMPLETE`).
+- [ ] Tap Sync now a second time. The second attempt transfers only the new delta.
+- [ ] Turn Bluetooth off while a sync is in progress. Turn it back on, link, and tap Sync now again. The attempt finishes COMPLETE, and a chunk that was open when the radio dropped is not acknowledged.

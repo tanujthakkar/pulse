@@ -39,7 +39,8 @@ data class SyncSessionRow(
  * One history chunk inside a session.
  *
  * [token] is the original 8-byte end token. [ackedAt] is Unix seconds UTC when
- * an acknowledgement has been sent. Nothing in this milestone writes it.
+ * an acknowledgement has been handed to the link. [SyncStore.commitChunk]
+ * leaves it null. [SyncStore.markAcknowledged] writes it after that handoff.
  */
 @Entity(
     tableName = "sync_chunk",
