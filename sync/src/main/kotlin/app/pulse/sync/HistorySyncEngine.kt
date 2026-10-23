@@ -51,6 +51,7 @@ class HistorySyncEngine(
     private val nowMs: () -> Long = { 0L },
     private val onFinished: (SessionOutcome) -> Unit = {},
     private val onStreamPulse: () -> Unit = {},
+    private val onProgress: (SyncSnapshot) -> Unit = {},
 ) {
     val specVersion: String = ProtocolSpecVersion.CURRENT
 
@@ -66,6 +67,13 @@ class HistorySyncEngine(
     val events: List<SyncTrace>
         get() = trace.toList()
 
+    fun snapshot(): SyncSnapshot = SyncSnapshot(
+        phase = phase,
+        chunks = chunksCommitted,
+        records = recordsSeen,
+        outcome = outcome,
+    )
+
     private val connection = ConnectionId(NEXT_CONNECTION.incrementAndGet())
     private val tracker = RequestTracker()
     private val incoming = HashMap<String, FrameAccumulator>()
@@ -75,7 +83,9 @@ class HistorySyncEngine(
     private val archivedSide = mutableListOf<WireFrame>()
 
     private var active = false
-    private var phase = Phase.IDLE
+    private var phase = SyncPhase.IDLE
+    private var chunksCommitted = 0
+    private var recordsSeen = 0
     private var sequence = 1
     private var sessionId: Long? = null
     private var sessionClosed = false
@@ -87,13 +97,16 @@ class HistorySyncEngine(
     fun start() {
         if (active) return
         if (address.isBlank()) {
+            phase = SyncPhase.DONE
             outcome = SessionOutcome.ABORTED
             trace += SyncTrace.Closed(SessionOutcome.ABORTED)
+            publish()
             onFinished(SessionOutcome.ABORTED)
             return
         }
         active = true
-        phase = Phase.CLOCK
+        phase = SyncPhase.CLOCK
+        publish()
         send(ClockCommand.GET, ClockCommand.getBody())
     }
 
@@ -119,7 +132,7 @@ class HistorySyncEngine(
      * @return true when the quiet window has elapsed and the attempt ended.
      */
     fun onWatchdog(): Boolean {
-        if (!active || phase != Phase.STREAM) return false
+        if (!active || phase != SyncPhase.STREAM) return false
         if (nowMs() - lastTrafficMs < HistoryLimits.WATCHDOG_MS) return false
         dropChunk()
         finish(SessionOutcome.WATCHDOG)
@@ -128,14 +141,14 @@ class HistorySyncEngine(
 
     /** Milliseconds until [onWatchdog] would end the attempt, or null outside the stream. */
     fun quietRemainingMs(): Long? {
-        if (!active || phase != Phase.STREAM) return null
+        if (!active || phase != SyncPhase.STREAM) return null
         val left = HistoryLimits.WATCHDOG_MS - (nowMs() - lastTrafficMs)
         return if (left < 0) 0 else left
     }
 
     private fun onFrame(frame: WireFrame) {
         if (!active) return
-        if (phase == Phase.STREAM && frame.packetType in HistoryLimits.TRAFFIC) {
+        if (phase == SyncPhase.STREAM && frame.packetType in HistoryLimits.TRAFFIC) {
             lastTrafficMs = nowMs()
             onStreamPulse()
         }
@@ -147,7 +160,7 @@ class HistorySyncEngine(
             }
             return
         }
-        if (phase != Phase.STREAM) return
+        if (phase != SyncPhase.STREAM) return
         when (frame.packetType) {
             PacketType.HISTORY_RECORD -> onRecord(frame)
             PacketType.HISTORY_METADATA -> onMetadata(frame)
@@ -159,13 +172,13 @@ class HistorySyncEngine(
     private fun onMatched(match: ReplyMatch.Matched, body: ByteArray) {
         if (!active) return
         when (phase) {
-            Phase.CLOCK -> onClock(match, body, verifying = false)
-            Phase.CLOCK_VERIFY -> onClock(match, body, verifying = true)
-            Phase.CLOCK_SET -> onClockSet(match)
-            Phase.RANGE -> onRange(match, body)
-            Phase.START -> onHistoryStart(match, body)
-            Phase.STREAM -> Unit
-            Phase.IDLE, Phase.DONE -> Unit
+            SyncPhase.CLOCK -> onClock(match, body, verifying = false)
+            SyncPhase.CLOCK_VERIFY -> onClock(match, body, verifying = true)
+            SyncPhase.CLOCK_SET -> onClockSet(match)
+            SyncPhase.RANGE -> onRange(match, body)
+            SyncPhase.START -> onHistoryStart(match, body)
+            SyncPhase.STREAM -> Unit
+            SyncPhase.IDLE, SyncPhase.DONE -> Unit
         }
     }
 
@@ -188,7 +201,8 @@ class HistorySyncEngine(
                 fail(SessionOutcome.ABORTED)
                 return
             }
-            phase = Phase.CLOCK_SET
+            phase = SyncPhase.CLOCK_SET
+            publish()
             send(ClockCommand.SET, ClockCommand.setBody(now.unixSeconds, now.ticks))
             return
         }
@@ -197,12 +211,14 @@ class HistorySyncEngine(
 
     private fun onClockSet(match: ReplyMatch.Matched) {
         if (match.command != ClockCommand.SET || match.pending) return
-        phase = Phase.CLOCK_VERIFY
+        phase = SyncPhase.CLOCK_VERIFY
+        publish()
         send(ClockCommand.GET, ClockCommand.getBody())
     }
 
     private fun beginRange() {
-        phase = Phase.RANGE
+        phase = SyncPhase.RANGE
+        publish()
         send(DataRangeCommand.NUMBER, DataRangeCommand.requestBody())
     }
 
@@ -227,7 +243,8 @@ class HistorySyncEngine(
         sessionId = id
         rangeSnapshot = snapshot.copyOf()
         trace += SyncTrace.Opened(id, snapshot.copyOf())
-        phase = Phase.START
+        phase = SyncPhase.START
+        publish()
         send(HistoryStartCommand.NUMBER, HistoryStartCommand.EXPLICIT_ZERO.copyOf())
     }
 
@@ -251,13 +268,16 @@ class HistorySyncEngine(
             fail(SessionOutcome.ABORTED)
             return
         }
-        phase = Phase.STREAM
+        phase = SyncPhase.STREAM
         lastTrafficMs = nowMs()
+        publish()
         onStreamPulse()
     }
 
     private fun onRecord(frame: WireFrame) {
         records += frame
+        recordsSeen += 1
+        publish()
         if (records.size >= HistoryLimits.MAX_RECORDS_WITHOUT_END) {
             dropChunk()
             finish(SessionOutcome.BOUNDED)
@@ -343,6 +363,8 @@ class HistorySyncEngine(
             archived = receipt.archivedInserted,
             duplicate = receipt.duplicate,
         )
+        chunksCommitted += 1
+        publish()
         if (!active || !ackEnabled()) return
         val body = HistoryAckCommand.body(kept)
         val seq = nextSequence()
@@ -411,7 +433,7 @@ class HistorySyncEngine(
     private fun finish(outcome: SessionOutcome) {
         if (!active) return
         active = false
-        phase = Phase.DONE
+        phase = SyncPhase.DONE
         this.outcome = outcome
         val session = sessionId
         if (session != null && !sessionClosed) {
@@ -425,24 +447,18 @@ class HistorySyncEngine(
         incoming.values.forEach { it.reset() }
         tracker.dropConnection(connection)
         trace += SyncTrace.Closed(outcome)
+        publish()
         onFinished(outcome)
+    }
+
+    private fun publish() {
+        onProgress(snapshot())
     }
 
     private fun nextSequence(): Int {
         val current = sequence
         sequence = (sequence + 1) and 0xFF
         return current
-    }
-
-    private enum class Phase {
-        IDLE,
-        CLOCK,
-        CLOCK_SET,
-        CLOCK_VERIFY,
-        RANGE,
-        START,
-        STREAM,
-        DONE,
     }
 
     private companion object {

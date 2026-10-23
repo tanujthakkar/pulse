@@ -263,6 +263,10 @@ class HistorySyncEngineTest {
         val run = run(store, script(stream = StreamKind.FLOOD, floodCount = HistoryLimits.MAX_RECORDS_WITHOUT_END))
         assertEquals(HistoryLimits.MAX_RECORDS_WITHOUT_END, 2_000)
         assertEquals(SessionOutcome.BOUNDED, run.engine.outcome)
+        assertEquals(SyncPhase.DONE, run.engine.snapshot().phase)
+        assertEquals(HistoryLimits.MAX_RECORDS_WITHOUT_END, run.engine.snapshot().records)
+        assertEquals(0, run.engine.snapshot().chunks)
+        assertEquals(SessionOutcome.BOUNDED, run.engine.snapshot().outcome)
         assertTrue(store.chunks.isEmpty())
         assertTrue(run.engine.events.any { it is SyncTrace.DroppedChunk })
         assertNoAcks(run)
@@ -357,6 +361,10 @@ class HistorySyncEngineTest {
             assertTrue(run.engine.events.none { it is SyncTrace.Ack })
             assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
             assertTrue(run.engine.isActive)
+            assertEquals(SyncPhase.STREAM, run.engine.snapshot().phase)
+            assertEquals(1, run.engine.snapshot().chunks)
+            assertEquals(1, run.engine.snapshot().records)
+            assertNull(run.engine.snapshot().outcome)
             assertNoDeniedCommands(run.written)
         } finally {
             HistoryAckGate.debugRequested = false
@@ -383,6 +391,35 @@ class HistorySyncEngineTest {
         assertTrue(engine.events.none { it is SyncTrace.Opened })
         engine.onNotification("notify", response.copyOfRange(7, response.size))
         assertEquals(listOf(147, 34), sentCommands(engine))
+    }
+
+    @Test
+    fun snapshotCountsRecordsBeforeTheChunkAndTheChunkBeforeTheOutcome() {
+        val seen = mutableListOf<SyncSnapshot>()
+        val run = run(
+            MemorySyncStore(),
+            script(),
+            onProgress = { seen += it },
+        )
+        assertTrue(seen.any { it.phase == SyncPhase.CLOCK && it.outcome == null })
+        assertTrue(seen.any { it.phase == SyncPhase.RANGE && it.outcome == null })
+        assertTrue(seen.any { it.phase == SyncPhase.START && it.outcome == null })
+        assertTrue(
+            seen.any {
+                it.phase == SyncPhase.STREAM && it.records == 1 && it.chunks == 0 && it.outcome == null
+            },
+        )
+        assertTrue(
+            seen.any {
+                it.phase == SyncPhase.STREAM && it.records == 1 && it.chunks == 1 && it.outcome == null
+            },
+        )
+        val done = run.engine.snapshot()
+        assertEquals(SyncPhase.DONE, done.phase)
+        assertEquals(1, done.chunks)
+        assertEquals(1, done.records)
+        assertEquals(SessionOutcome.COMPLETE, done.outcome)
+        assertEquals(SessionOutcome.COMPLETE, seen.last().outcome)
     }
 
     @Test
@@ -419,11 +456,12 @@ class HistorySyncEngineTest {
         script: StrapScript,
         clock: ManualMillis = ManualMillis(),
         ackEnabled: () -> Boolean = { true },
+        onProgress: (SyncSnapshot) -> Unit = {},
     ): Attempt {
         val strap = FakeStrap(script)
         val written = mutableListOf<ByteArray>()
         val outbox = ArrayDeque<ByteArray>()
-        val engine = engine(store, clock, written, ackEnabled) { frame ->
+        val engine = engine(store, clock, written, ackEnabled, onProgress) { frame ->
             outbox += frame
             true
         }
@@ -456,6 +494,7 @@ class HistorySyncEngineTest {
         clock: ManualMillis,
         written: MutableList<ByteArray>,
         ackEnabled: () -> Boolean,
+        onProgress: (SyncSnapshot) -> Unit = {},
         transmit: (ByteArray) -> Boolean = { true },
     ): HistorySyncEngine {
         return HistorySyncEngine(
@@ -468,6 +507,7 @@ class HistorySyncEngineTest {
             },
             ackEnabled = ackEnabled,
             nowMs = { clock.value },
+            onProgress = onProgress,
         )
     }
 

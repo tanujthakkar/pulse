@@ -96,3 +96,50 @@ fun interface HistorySubscription {
 fun interface HistoryScheduler {
     fun after(delayMs: Long, task: () -> Unit): HistorySubscription
 }
+
+/**
+ * Where one history attempt is.
+ *
+ * [IDLE] is before Sync now. [DONE] is set when the attempt has an outcome.
+ */
+enum class SyncPhase {
+    IDLE,
+    CLOCK,
+    CLOCK_SET,
+    CLOCK_VERIFY,
+    RANGE,
+    START,
+    STREAM,
+    DONE,
+}
+
+/**
+ * Live view of the attempt in progress.
+ *
+ * [chunks] counts end tokens committed on this attempt, including a token that
+ * was already stored. [records] counts history records received, including a
+ * chunk that is later dropped. [outcome] stays null until the attempt ends.
+ */
+data class SyncSnapshot(
+    val phase: SyncPhase,
+    val chunks: Int,
+    val records: Int,
+    val outcome: SessionOutcome?,
+)
+
+/**
+ * What the sync screen observes.
+ *
+ * [outcome] and [finishedAt] stay in place until the next attempt ends.
+ * [chunks] and [records] reset when a new attempt starts. [blocked] is set
+ * when Sync now is tapped with no strap linked.
+ */
+data class SyncActivity(
+    val phase: SyncPhase = SyncPhase.IDLE,
+    val running: Boolean = false,
+    val chunks: Int = 0,
+    val records: Int = 0,
+    val outcome: SessionOutcome? = null,
+    val finishedAt: PhoneTime? = null,
+    val blocked: String? = null,
+)

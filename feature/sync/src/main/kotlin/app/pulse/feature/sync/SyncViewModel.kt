@@ -12,6 +12,7 @@ import app.pulse.sync.HistoryScheduler
 import app.pulse.sync.HistorySubscription
 import app.pulse.sync.HistorySyncDriver
 import app.pulse.sync.PhoneClock
+import app.pulse.sync.SyncActivity
 import app.pulse.sync.SyncStore
 import app.pulse.sync.phoneTimeFromUnixMillis
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,8 +24,10 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Manual history sync.
  *
- * The button starts one attempt. Status text is a single line. The sync
- * status screen is later work. Acknowledgements stay behind the metadata gate.
+ * The button starts one attempt. [activity] is the session state, the live
+ * chunk and record counts, and the last outcome with its time. The button
+ * stays disabled while that attempt runs. Acknowledgements stay behind the
+ * metadata gate.
  */
 @HiltViewModel
 class SyncViewModel @Inject constructor(
@@ -44,17 +47,11 @@ class SyncViewModel @Inject constructor(
         log = { line -> Log.i(LOG_TAG, line) },
     )
 
-    private val _status = MutableStateFlow(driver.status)
-    val status: StateFlow<String> = _status.asStateFlow()
-
-    private val _running = MutableStateFlow(driver.running)
-    val running: StateFlow<Boolean> = _running.asStateFlow()
+    private val _activity = MutableStateFlow(driver.activity)
+    val activity: StateFlow<SyncActivity> = _activity.asStateFlow()
 
     init {
-        driver.onChange = {
-            _status.value = driver.status
-            _running.value = driver.running
-        }
+        driver.onChange = { _activity.value = driver.activity }
     }
 
     fun syncNow() {
