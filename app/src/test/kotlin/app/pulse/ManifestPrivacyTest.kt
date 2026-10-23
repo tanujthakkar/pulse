@@ -29,8 +29,16 @@ class ManifestPrivacyTest {
         assertTrue(app.contains("android.permission.BLUETOOTH_SCAN"))
         assertTrue(app.contains("android.permission.BLUETOOTH_CONNECT"))
         assertTrue(app.contains("android.permission.POST_NOTIFICATIONS"))
+        assertTrue(app.contains("android.permission.FOREGROUND_SERVICE"))
+        assertTrue(app.contains("android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"))
         assertTrue(app.contains("neverForLocation"))
         assertFalse(app.contains("android.permission.INTERNET"))
+        val link = File(root, "link/src/main/AndroidManifest.xml").readText()
+        assertTrue(link.contains(".StrapLinkService"))
+        assertTrue(link.contains("android:foregroundServiceType=\"connectedDevice\""))
+        assertTrue(link.contains("android:exported=\"false\""))
+        assertTrue(link.contains("android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"))
+        assertTrue(link.contains("android.permission.POST_NOTIFICATIONS"))
     }
 
     private fun repoRoot(): File {

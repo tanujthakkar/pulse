@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="link_channel_name">Strap link</string>
+    <string name="link_channel_description">Shown while Pulse keeps a connection to your strap.</string>
+</resources>

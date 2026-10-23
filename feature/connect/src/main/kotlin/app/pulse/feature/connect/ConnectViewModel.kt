@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Gates Connect on runtime grants and the Bluetooth radio, then runs
  * [StrapLink] once pairing is allowed to start.
+ *
+ * Stopping the link is explicit ([stopLink], or a gate that is not ready).
+ * Clearing this screen does not disconnect. [app.pulse.link.StrapLinkService]
+ * keeps the session, and the history engine it retains, while the link is up.
  */
 @HiltViewModel
 class ConnectViewModel @Inject constructor(
@@ -81,10 +85,5 @@ class ConnectViewModel @Inject constructor(
         } else {
             link.stop()
         }
-    }
-
-    override fun onCleared() {
-        link.stop()
-        super.onCleared()
     }
 }
