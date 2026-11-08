@@ -6,7 +6,8 @@ import app.pulse.wire.codec.HistoryAckGate
  * Manual "Sync now" entry.
  *
  * [status] stays a single line for the attempt. [activity] is the live session
- * view: phase, chunk and record counts, and the last outcome with its time.
+ * view: phase, chunk and record counts, saved-row counts, and the outcome of
+ * the attempt that just finished. A new attempt clears that outcome.
  *
  * Production leaves [ackEnabled] on [HistoryAckGate.maySend], which stays
  * false until a Pulse capture confirms the metadata offsets. The engine still
@@ -38,6 +39,19 @@ class HistorySyncDriver(
     private var alarm: HistorySubscription? = null
     private var latest: SyncSnapshot = SyncSnapshot(SyncPhase.IDLE, 0, 0, null)
 
+    /** Reads local-storage totals into [activity] while no attempt is running. */
+    fun refreshSaved() {
+        if (running) return
+        val counts = try {
+            store.savedCounts()
+        } catch (error: Exception) {
+            return
+        }
+        if (activity.savedSamples == counts.samples && activity.savedChunks == counts.chunks) return
+        activity = activity.copy(savedSamples = counts.samples, savedChunks = counts.chunks)
+        onChange()
+    }
+
     fun syncNow() {
         if (running) return
         val address = link.address
@@ -67,6 +81,14 @@ class HistorySyncDriver(
             running = true,
             chunks = 0,
             records = 0,
+            endsReceived = 0,
+            chunksDuplicate = 0,
+            endsRetried = 0,
+            endsRejected = 0,
+            ignoredCompletes = 0,
+            droppedUncommitted = false,
+            outcome = null,
+            finishedAt = null,
             blocked = null,
         )
         subscription = link.listen(
@@ -95,6 +117,16 @@ class HistorySyncDriver(
             running = true,
             chunks = snap.chunks,
             records = snap.records,
+            endsReceived = snap.endsReceived,
+            chunksDuplicate = snap.chunksDuplicate,
+            endsRetried = snap.endsRetried,
+            endsRejected = snap.endsRejected,
+            ignoredCompletes = snap.ignoredCompletes,
+            droppedUncommitted = false,
+            savedSamples = snap.savedSamples,
+            savedChunks = snap.savedChunks,
+            outcome = null,
+            finishedAt = null,
             blocked = null,
         )
         onChange()
@@ -118,6 +150,14 @@ class HistorySyncDriver(
             running = false,
             chunks = snap.chunks,
             records = snap.records,
+            endsReceived = snap.endsReceived,
+            chunksDuplicate = snap.chunksDuplicate,
+            endsRetried = snap.endsRetried,
+            endsRejected = snap.endsRejected,
+            ignoredCompletes = snap.ignoredCompletes,
+            droppedUncommitted = snap.droppedUncommitted,
+            savedSamples = snap.savedSamples,
+            savedChunks = snap.savedChunks,
             outcome = outcome,
             finishedAt = phone.now(),
             blocked = null,

@@ -3,6 +3,7 @@ package app.pulse.sync
 import app.pulse.testing.fakestrap.FakeStrap
 import app.pulse.testing.fakestrap.StrapScript
 import app.pulse.wire.codec.ClockCommand
+import app.pulse.wire.codec.DataRangeCommand
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.FrameCodec
 import app.pulse.wire.codec.HistoryAckCommand
@@ -53,6 +54,36 @@ class HistorySyncDriverTest {
     }
 
     @Test
+    fun idleSavedCountsComeFromTheStore() {
+        val store = MemorySyncStore()
+        val session = store.openSession(
+            deviceAddress = "AA:BB:CC:DD:EE:FF",
+            startedUnixSeconds = 1L,
+            startedSubsecondTicks = null,
+            rangeSnapshot = ByteArray(DataRangeCommand.BODY_BYTES),
+        )
+        store.commitChunk(
+            sessionId = session,
+            frames = emptyList(),
+            r18Rows = emptyList(),
+            archived = emptyList(),
+            token = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+        )
+        val driver = HistorySyncDriver(
+            link = FakeHistoryLink(),
+            store = store,
+            phone = PhoneClock { PhoneTime(1L, 0) },
+            schedule = HistoryScheduler { _, _ -> HistorySubscription { } },
+            nowMs = { 0L },
+        )
+        driver.refreshSaved()
+        assertEquals(0, driver.activity.savedSamples)
+        assertEquals(1, driver.activity.savedChunks)
+        assertNull(driver.activity.outcome)
+        assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
     fun countsAdvanceWhileTheAckGateStaysClosed() {
         val strap = FakeStrap(StrapScript())
         val link = ScriptedHistoryLink(strap)
@@ -85,8 +116,8 @@ class HistorySyncDriverTest {
         assertTrue(driver.running)
         assertEquals(0, driver.activity.chunks)
         assertEquals(0, driver.activity.records)
-        assertEquals(SessionOutcome.DISCONNECTED, driver.activity.outcome)
-        assertEquals(PhoneTime(1_700_000_000L, 7), driver.activity.finishedAt)
+        assertNull(driver.activity.outcome)
+        assertNull(driver.activity.finishedAt)
         assertEquals(0, link.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
     }
 

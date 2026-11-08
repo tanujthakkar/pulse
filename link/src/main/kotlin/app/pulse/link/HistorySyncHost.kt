@@ -63,6 +63,7 @@ class HistorySyncHost @Inject constructor(
             activityOut.value = driver.activity
             listeners.toList().forEach { it() }
         }
+        driver.refreshSaved()
     }
 
     fun syncNow() {

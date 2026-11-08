@@ -117,5 +117,10 @@ class HistoryCommandsTest {
             ),
         ).ok()
         assertNull(HistoryMetadata.read(other))
+        assertTrue(HistoryMetadata.echoable(token))
+        assertFalse(HistoryMetadata.echoable(ByteArray(8) { 0xFF.toByte() }))
+        assertFalse(HistoryMetadata.echoable(ByteArray(7)))
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
     }
 }

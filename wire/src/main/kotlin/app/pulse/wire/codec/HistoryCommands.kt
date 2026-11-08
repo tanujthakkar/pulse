@@ -128,6 +128,18 @@ object HistoryMetadata {
         }
         return MetadataView(kind, token)
     }
+
+    /**
+     * True when [token] is an 8-byte cursor that may be stored.
+     *
+     * Eight `0xFF` bytes are not a cursor. Callers must not store that pattern
+     * or copy it into an acknowledgement. Any other length is not echoable.
+     * This does not open [HistoryAckGate].
+     */
+    fun echoable(token: ByteArray): Boolean {
+        if (token.size != TOKEN_BYTES) return false
+        return token.any { it != 0xFF.toByte() }
+    }
 }
 
 class MetadataView(

@@ -67,7 +67,22 @@ interface SyncStore {
         token: ByteArray,
         ackedUnixSeconds: Long,
     )
+
+    /**
+     * Counts rows already stored on this phone.
+     *
+     * [SavedCounts.samples] is layout-18 rows. [SavedCounts.chunks] is chunk
+     * rows. This is a read of local storage, not a count of frames received
+     * on the current attempt.
+     */
+    fun savedCounts(): SavedCounts
 }
+
+/** Local-storage totals from [SyncStore.savedCounts]. */
+data class SavedCounts(
+    val samples: Int,
+    val chunks: Int,
+)
 
 /** End-token length from spec §8. */
 const val HISTORY_TOKEN_BYTES: Int = 8

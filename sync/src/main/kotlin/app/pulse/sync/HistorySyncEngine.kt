@@ -30,9 +30,11 @@ import java.util.concurrent.atomic.AtomicLong
  * when the strap is more than [HistoryLimits.CLOCK_DRIFT_SECONDS] from the
  * phone, clock get again, data range, open a session with that 65-byte
  * snapshot, history start with an explicit `00`, then metadata and records.
- * Each metadata end is committed
- * and only then acknowledged. The acknowledgement body is `01` plus the
- * original token bytes.
+ * Each metadata end with an echoable token is committed once and only then
+ * acknowledged. A repeated end for a token already handled on this attempt
+ * is a retry and is not committed or acknowledged again. Eight `0xFF` bytes
+ * are not a token: they are not stored and not acknowledged. The
+ * acknowledgement body is `01` plus the original token bytes.
  *
  * [ackEnabled] is the production gate. When it is false the chunk is still
  * committed and no command 23 frame is handed to [transmit]. Callers serialize
@@ -72,6 +74,14 @@ class HistorySyncEngine(
         chunks = chunksCommitted,
         records = recordsSeen,
         outcome = outcome,
+        endsReceived = endsReceived,
+        chunksDuplicate = chunksDuplicate,
+        endsRetried = endsRetried,
+        endsRejected = endsRejected,
+        ignoredCompletes = ignoredCompletes,
+        droppedUncommitted = droppedUncommitted,
+        savedSamples = savedSamples,
+        savedChunks = savedChunks,
     )
 
     private val connection = ConnectionId(NEXT_CONNECTION.incrementAndGet())
@@ -85,7 +95,17 @@ class HistorySyncEngine(
     private var active = false
     private var phase = SyncPhase.IDLE
     private var chunksCommitted = 0
+    private var chunksDuplicate = 0
     private var recordsSeen = 0
+    private var endsReceived = 0
+    private var endsRetried = 0
+    private var endsRejected = 0
+    private var ignoredCompletes = 0
+    private var droppedUncommitted = false
+    private var savedSamples = 0
+    private var savedChunks = 0
+    private var sawStart = false
+    private val handledTokens = HashSet<String>()
     private var sequence = 1
     private var sessionId: Long? = null
     private var sessionClosed = false
@@ -106,6 +126,7 @@ class HistorySyncEngine(
         }
         active = true
         phase = SyncPhase.CLOCK
+        refreshSaved()
         publish()
         send(ClockCommand.GET, ClockCommand.getBody())
     }
@@ -269,6 +290,7 @@ class HistorySyncEngine(
             return
         }
         phase = SyncPhase.STREAM
+        sawStart = false
         lastTrafficMs = nowMs()
         publish()
         onStreamPulse()
@@ -287,21 +309,46 @@ class HistorySyncEngine(
     private fun onMetadata(frame: WireFrame) {
         val view = HistoryMetadata.read(frame) ?: return
         when (view.kind) {
-            HistoryMetadata.START -> Unit
-            HistoryMetadata.END -> {
-                val token = view.token
-                if (token == null || token.size != HISTORY_TOKEN_BYTES) {
-                    dropChunk()
-                    finish(SessionOutcome.ABORTED)
-                    return
-                }
-                commitThenAck(token)
-            }
-            HistoryMetadata.COMPLETE -> {
-                if (buffered()) dropChunk()
-                finish(SessionOutcome.COMPLETE)
-            }
+            HistoryMetadata.START -> sawStart = true
+            HistoryMetadata.END -> onEnd(view.token)
+            HistoryMetadata.COMPLETE -> onComplete()
         }
+    }
+
+    /**
+     * A complete with no start in this stream is not this attempt finishing.
+     *
+     * Idle traffic never reaches here. A complete after a start still ends
+     * the attempt; tying that frame to a particular request is not claimed.
+     */
+    private fun onComplete() {
+        if (!sawStart) {
+            ignoredCompletes += 1
+            publish()
+            return
+        }
+        dropChunk()
+        finish(SessionOutcome.COMPLETE)
+    }
+
+    private fun onEnd(token: ByteArray?) {
+        if (token == null || token.size != HISTORY_TOKEN_BYTES) {
+            dropChunk()
+            finish(SessionOutcome.ABORTED)
+            return
+        }
+        endsReceived += 1
+        if (!HistoryMetadata.echoable(token)) {
+            endsRejected += 1
+            publish()
+            return
+        }
+        if (tokenKey(token) in handledTokens) {
+            endsRetried += 1
+            publish()
+            return
+        }
+        commitThenAck(token)
     }
 
     private fun commitThenAck(token: ByteArray) {
@@ -363,9 +410,12 @@ class HistorySyncEngine(
             archived = receipt.archivedInserted,
             duplicate = receipt.duplicate,
         )
-        chunksCommitted += 1
+        handledTokens += tokenKey(kept)
+        if (receipt.duplicate) chunksDuplicate += 1 else chunksCommitted += 1
+        refreshSaved()
         publish()
         if (!active || !ackEnabled()) return
+        if (!HistoryMetadata.echoable(kept)) return
         val body = HistoryAckCommand.body(kept)
         val seq = nextSequence()
         val ackFrame = FrameCodec.encode(
@@ -412,8 +462,22 @@ class HistorySyncEngine(
     private fun dropChunk() {
         if (!buffered()) return
         clearBuffer()
+        droppedUncommitted = true
         trace += SyncTrace.DroppedChunk
     }
+
+    private fun refreshSaved() {
+        try {
+            val counts = store.savedCounts()
+            savedSamples = counts.samples
+            savedChunks = counts.chunks
+        } catch (error: Exception) {
+            // A count query must not end the attempt. The last count stays.
+        }
+    }
+
+    private fun tokenKey(token: ByteArray): String =
+        token.joinToString(separator = "") { "%02x".format(it) }
 
     private fun buffered(): Boolean =
         records.isNotEmpty() || side.isNotEmpty() || archivedSide.isNotEmpty()
@@ -447,6 +511,7 @@ class HistorySyncEngine(
         incoming.values.forEach { it.reset() }
         tracker.dropConnection(connection)
         trace += SyncTrace.Closed(outcome)
+        refreshSaved()
         publish()
         onFinished(outcome)
     }

@@ -95,6 +95,11 @@ class MemorySyncStore : SyncStore {
         )
     }
 
+    override fun savedCounts(): SavedCounts = SavedCounts(
+        samples = sampleKeys.size,
+        chunks = chunks.size,
+    )
+
     override fun markAcknowledged(sessionId: Long, token: ByteArray, ackedUnixSeconds: Long) {
         val session = sessions.first { it.id == sessionId }
         val chunk = chunks.find { it.device == session.device && it.token.contentEquals(token) }

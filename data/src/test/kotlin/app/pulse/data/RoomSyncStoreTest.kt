@@ -188,6 +188,9 @@ class RoomSyncStoreTest {
         assertEquals(2, read { database.samples().count() })
         assertEquals(70, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX) }?.heartRateRaw)
         assertEquals(55, read { database.samples().find(ADDRESS, 7, SAMPLE_UNIX + 1) }?.heartRateRaw)
+        assertEquals(2, store.savedCounts().samples)
+        assertEquals(3, store.savedCounts().chunks)
+        assertFalse(HistoryAckGate.maySend())
     }
 
     @Test

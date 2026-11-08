@@ -70,8 +70,9 @@ class DebugScreenTest {
         compose.onNodeWithText("SECRETBLOCK", substring = true).assertDoesNotExist()
 
         compose.onNodeWithTag("debug_pause").performClick()
-        compose.onNodeWithTag("debug_pause").assertTextContains("Resume")
-        compose.onNodeWithTag("debug_count").assertTextContains("Paused.", substring = true)
+        compose.onNodeWithTag("debug_pause").assertTextContains("Resume recording")
+        compose.onNodeWithTag("debug_count").assertTextContains("Recording is paused.", substring = true)
+        compose.onNodeWithTag("debug_count").assertTextContains("can miss traffic", substring = true)
         compose.runOnIdle {
             intake.offer(true, "2a37", false, byteArrayOf(0x00, 0x48), 2L)
         }

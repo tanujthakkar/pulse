@@ -116,29 +116,49 @@ enum class SyncPhase {
 /**
  * Live view of the attempt in progress.
  *
- * [chunks] counts end tokens committed on this attempt, including a token that
- * was already stored. [records] counts history records received, including a
- * chunk that is later dropped. [outcome] stays null until the attempt ends.
+ * [chunks] counts end tokens newly stored on this attempt. A token that was
+ * already stored is [chunksDuplicate], and a later copy of a token already
+ * handled on this attempt is [endsRetried]. [records] counts history records
+ * received, including a chunk that is later dropped. [savedSamples] and
+ * [savedChunks] are the last local-storage counts. [outcome] stays null until
+ * the attempt ends.
  */
 data class SyncSnapshot(
     val phase: SyncPhase,
     val chunks: Int,
     val records: Int,
     val outcome: SessionOutcome?,
+    val endsReceived: Int = 0,
+    val chunksDuplicate: Int = 0,
+    val endsRetried: Int = 0,
+    val endsRejected: Int = 0,
+    val ignoredCompletes: Int = 0,
+    val droppedUncommitted: Boolean = false,
+    val savedSamples: Int = 0,
+    val savedChunks: Int = 0,
 )
 
 /**
  * What the sync screen observes.
  *
- * [outcome] and [finishedAt] stay in place until the next attempt ends.
- * [chunks] and [records] reset when a new attempt starts. [blocked] is set
- * when Sync now is tapped with no strap linked.
+ * [outcome] and [finishedAt] clear when a new attempt starts. A tap with no
+ * strap linked leaves them in place. [chunks] counts tokens newly stored on
+ * this attempt. [savedSamples] and [savedChunks] are local-storage counts.
+ * [blocked] is set when Sync now is tapped with no strap linked.
  */
 data class SyncActivity(
     val phase: SyncPhase = SyncPhase.IDLE,
     val running: Boolean = false,
     val chunks: Int = 0,
     val records: Int = 0,
+    val endsReceived: Int = 0,
+    val chunksDuplicate: Int = 0,
+    val endsRetried: Int = 0,
+    val endsRejected: Int = 0,
+    val ignoredCompletes: Int = 0,
+    val droppedUncommitted: Boolean = false,
+    val savedSamples: Int = 0,
+    val savedChunks: Int = 0,
     val outcome: SessionOutcome? = null,
     val finishedAt: PhoneTime? = null,
     val blocked: String? = null,

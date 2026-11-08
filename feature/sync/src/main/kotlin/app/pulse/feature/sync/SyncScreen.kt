@@ -48,20 +48,40 @@ fun SyncScreen(
             )
         }
         Text(
-            text = "Chunks",
+            text = "Chunks this attempt",
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.padding(top = 8.dp),
         )
         Text(
             text = ui.chunks,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.testTag("sync_chunks"),
         )
-        Text(text = "Records", style = MaterialTheme.typography.labelLarge)
+        Text(text = "Received records", style = MaterialTheme.typography.labelLarge)
         Text(
             text = ui.records,
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.testTag("sync_records"),
+        )
+        Text(text = "Saved records", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = ui.savedRecords,
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.testTag("sync_saved_records"),
+        )
+        Text(
+            text = "Layout-18 rows stored on this phone.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(text = "Saved chunks", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = ui.savedChunks,
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.testTag("sync_saved_chunks"),
+        )
+        Text(
+            text = "Chunk rows stored on this phone.",
+            style = MaterialTheme.typography.bodyMedium,
         )
         Text(
             text = "Last outcome",

@@ -14,10 +14,13 @@ import org.junit.Test
 class SyncDisplayTest {
     @Test
     fun idleShowsZerosAndNoError() {
-        val ui = syncUi(SyncActivity())
+        val activity = SyncActivity()
+        val ui = syncUi(activity)
         assertEquals("Idle", ui.state)
-        assertEquals("0", ui.chunks)
+        assertEquals(chunkLine(activity), ui.chunks)
         assertEquals("0", ui.records)
+        assertEquals("0", ui.savedRecords)
+        assertEquals("0", ui.savedChunks)
         assertEquals("—", ui.outcome)
         assertEquals("—", ui.time)
         assertFalse(ui.outcomeIsError)
@@ -26,23 +29,28 @@ class SyncDisplayTest {
     }
 
     @Test
-    fun aRunningAttemptShowsLiveCountsAndKeepsTheLastOutcome() {
-        val ui = syncUi(
-            SyncActivity(
-                phase = SyncPhase.STREAM,
-                running = true,
-                chunks = 2,
-                records = 5,
-                outcome = SessionOutcome.DISCONNECTED,
-                finishedAt = PhoneTime(1_700_000_000L, 7),
-            ),
+    fun aRunningAttemptHidesThePreviousOutcome() {
+        val activity = SyncActivity(
+            phase = SyncPhase.STREAM,
+            running = true,
+            chunks = 1,
+            records = 5,
+            endsReceived = 5,
+            endsRetried = 4,
+            savedSamples = 20,
+            savedChunks = 3,
+            outcome = SessionOutcome.DISCONNECTED,
+            finishedAt = PhoneTime(1_700_000_000L, 7),
         )
+        val ui = syncUi(activity)
         assertEquals("Receiving history", ui.state)
-        assertEquals("2", ui.chunks)
+        assertEquals(chunkLine(activity), ui.chunks)
         assertEquals("5", ui.records)
-        assertEquals(outcomeMessage(SessionOutcome.DISCONNECTED), ui.outcome)
+        assertEquals("20", ui.savedRecords)
+        assertEquals("3", ui.savedChunks)
+        assertEquals("—", ui.outcome)
         assertFalse(ui.outcomeIsError)
-        assertEquals("1700000000 s, 7 ticks", ui.time)
+        assertEquals("—", ui.time)
         assertFalse(ui.canSync)
     }
 
@@ -78,11 +86,43 @@ class SyncDisplayTest {
                     finishedAt = PhoneTime(42L, 0),
                 ),
             )
-            assertEquals(outcomeMessage(outcome), ui.outcome)
+            assertEquals(outcomeMessage(outcome, committedChunks = 1), ui.outcome)
             assertEquals("42 s, 0 ticks", ui.time)
             assertEquals(outcome != SessionOutcome.COMPLETE, ui.outcomeIsError)
             assertTrue(ui.canSync)
         }
+    }
+
+    @Test
+    fun aTimeoutNamesSavedRowsAndTheUncommittedTailSeparately() {
+        val kept = outcomeMessage(
+            SessionOutcome.WATCHDOG,
+            committedChunks = 1,
+            droppedUncommitted = false,
+        )
+        assertTrue(kept.contains("60"))
+        assertTrue(kept.contains("stay stored"))
+        assertTrue(kept.contains("No uncommitted records were dropped."))
+        assertFalse(kept.contains("open chunk was dropped"))
+
+        val tail = outcomeMessage(
+            SessionOutcome.WATCHDOG,
+            committedChunks = 1,
+            droppedUncommitted = true,
+        )
+        assertTrue(tail.contains("stay stored"))
+        assertTrue(tail.contains("The uncommitted records were dropped."))
+
+        val empty = outcomeMessage(
+            SessionOutcome.WATCHDOG,
+            committedChunks = 0,
+            droppedUncommitted = true,
+        )
+        assertTrue(empty.contains("Nothing from this attempt was saved."))
+        assertTrue(empty.contains("The uncommitted records were dropped."))
+        val finished = outcomeMessage(SessionOutcome.COMPLETE, committedChunks = 0, droppedUncommitted = true)
+        assertTrue(finished.contains("History finished."))
+        assertTrue(finished.contains("uncommitted records were not saved"))
     }
 
     @Test

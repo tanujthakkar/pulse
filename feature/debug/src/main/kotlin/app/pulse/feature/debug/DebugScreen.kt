@@ -25,6 +25,21 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.pulse.wire.codec.FrameNote
 
+/**
+ * Recording state for the debug capture.
+ *
+ * Paused means new notifications are not stored, so an export can miss traffic
+ * that the radio still delivered.
+ */
+fun recordingStatus(paused: Boolean, stored: Int): String {
+    val count = "$stored stored."
+    return if (paused) {
+        "Recording is paused. New frames are not stored, so this capture can miss traffic. $count"
+    } else {
+        "Recording is running. New frames are stored. $count"
+    }
+}
+
 @Composable
 fun DebugScreen(
     title: String,
@@ -62,17 +77,27 @@ fun DebugScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Button(onClick = onPause, modifier = Modifier.testTag("debug_pause")) {
-                        Text(if (paused) "Resume" else "Pause")
+                        Text(if (paused) "Resume recording" else "Pause recording")
                     }
                     Button(onClick = onExport, modifier = Modifier.testTag("debug_export")) {
                         Text("Export")
                     }
                 }
                 Text(
-                    text = if (paused) "Paused. $stored stored." else "$stored stored.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Recording",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    text = recordingStatus(paused, stored),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (paused) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
                     modifier = Modifier
-                        .padding(top = 8.dp)
+                        .padding(top = 4.dp)
                         .testTag("debug_count"),
                 )
                 if (exportStatus.isNotEmpty()) {

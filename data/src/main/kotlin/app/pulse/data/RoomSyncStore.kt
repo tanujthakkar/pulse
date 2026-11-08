@@ -4,6 +4,7 @@ import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.HISTORY_TOKEN_BYTES
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
+import app.pulse.sync.SavedCounts
 import app.pulse.sync.SyncClock
 import app.pulse.sync.SyncStore
 import app.pulse.wire.ProtocolSpecVersion
@@ -127,6 +128,13 @@ class RoomSyncStore(
         onIo {
             database.sessions().close(sessionId, endedUnixSeconds, endedSubsecondTicks)
         }
+    }
+
+    override fun savedCounts(): SavedCounts = onIo {
+        SavedCounts(
+            samples = database.samples().count(),
+            chunks = database.chunks().count(),
+        )
     }
 
     override fun markAcknowledged(

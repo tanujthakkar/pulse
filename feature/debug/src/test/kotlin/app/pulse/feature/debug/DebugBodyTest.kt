@@ -37,4 +37,17 @@ class DebugBodyTest {
         assertFalse(body.contains("SECRET"))
         assertFalse(body.contains("identity block"))
     }
+
+    @Test
+    fun recordingStatusSaysWhetherNewFramesAreStored() {
+        val running = recordingStatus(paused = false, stored = 4)
+        val paused = recordingStatus(paused = true, stored = 4)
+        assertTrue(running.contains("Recording is running."))
+        assertTrue(running.contains("New frames are stored."))
+        assertTrue(running.contains("4 stored."))
+        assertTrue(paused.contains("Recording is paused."))
+        assertTrue(paused.contains("can miss traffic"))
+        assertTrue(paused.contains("4 stored."))
+        assertFalse(paused.contains("Recording is running."))
+    }
 }

@@ -13,6 +13,7 @@ import app.pulse.ble.StrapSighting
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
+import app.pulse.sync.SavedCounts
 import app.pulse.sync.SyncStore
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.FrameCodec
@@ -222,6 +223,8 @@ class StrapLinkServiceTest {
             token: ByteArray,
             ackedUnixSeconds: Long,
         ) = error("not used")
+
+        override fun savedCounts(): SavedCounts = error("not used")
     }
 
     private fun foregroundType(shadow: ShadowService): Int {
