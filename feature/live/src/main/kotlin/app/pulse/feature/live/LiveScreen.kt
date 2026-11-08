@@ -37,6 +37,11 @@ fun LiveScreen(ui: LiveUi, modifier: Modifier = Modifier) {
             modifier = Modifier.testTag("live_status"),
         )
         Text(
+            text = ui.measurement,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.testTag("live_measurement"),
+        )
+        Text(
             text = ui.bpm,
             style = MaterialTheme.typography.displayLarge,
             modifier = Modifier.testTag("live_bpm"),

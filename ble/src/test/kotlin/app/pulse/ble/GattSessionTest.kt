@@ -335,6 +335,10 @@ class GattSessionTest {
         fixture.radio.succeedCccd()
         assertEquals("requestMtu", fixture.radio.started.last())
         assertNull(fixture.events.readyMtu)
+        assertEquals(
+            HeartRateChannel(subscribed = true, notifications = 0),
+            fixture.session.heartRateChannel.value,
+        )
 
         // flags 0x16: u8 HR, contact detected, R-R present. 72 bpm, 1024 ticks -> 1000 ms.
         fixture.radio.emit(hr, byteArrayOf(0x16, 0x48, 0x00, 0x04))
@@ -349,6 +353,10 @@ class GattSessionTest {
         fixture.radio.emit(StrapGatt.RESPONSE_NOTIFY, byteArrayOf(0x10, 0x48, 0x00, 0x04))
         assertEquals(1, fixture.session.heartRate.replayCache.size)
         assertEquals(72, fixture.session.heartRate.replayCache.single().bpm)
+        assertEquals(
+            HeartRateChannel(subscribed = true, notifications = 2),
+            fixture.session.heartRateChannel.value,
+        )
 
         fixture.radio.succeedMtu(247)
         repeat(StrapGatt.NOTIFY.size) { fixture.radio.succeedCccd() }

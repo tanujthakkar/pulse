@@ -1,5 +1,6 @@
 package app.pulse.feature.live
 
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import app.pulse.ble.SensorContact
 import app.pulse.link.LinkPhase
@@ -31,21 +32,47 @@ fun formatRr(rrMs: List<Int>): String {
 
 data class LiveUi(
     val status: String,
+    val measurement: String,
     val bpm: String,
     val rr: String,
     val contact: String?,
     val sparkline: List<Int>,
 )
 
-fun liveUi(phase: LinkPhase, sample: LiveHeartRate?, trace: List<Int>): LiveUi {
+fun liveUi(
+    phase: LinkPhase,
+    sample: LiveHeartRate?,
+    trace: List<Int>,
+    channel: HeartRateChannel = HeartRateChannel(),
+): LiveUi {
     val shown = sample?.bpm?.let(::displayedBpm)
     return LiveUi(
         status = statusFor(phase),
+        measurement = measurementStatus(channel, sample),
         bpm = shown?.toString() ?: LIVE_BPM_PLACEHOLDER,
         rr = sample?.let { formatRr(it.rrMs) } ?: LIVE_BPM_PLACEHOLDER,
         contact = sample?.let { contactLabel(it.contact) },
         sparkline = trace,
     )
+}
+
+/**
+ * Reports Heart Rate Measurement subscribe state. This does not write to
+ * the strap. No realtime-enable command is verified, so none is sent.
+ */
+fun measurementStatus(channel: HeartRateChannel, sample: LiveHeartRate?): String {
+    if (sample == null && channel.notifications == 0 && channel.subscribed) {
+        return "Heart Rate Measurement is subscribed. No notifications have arrived. " +
+            "Pulse does not send a realtime-enable command, so bpm stays unavailable."
+    }
+    if (sample == null && channel.notifications == 0) {
+        return "Heart Rate Measurement is not subscribed."
+    }
+    if (sample == null) {
+        return "Heart Rate Measurement notifications: ${channel.notifications}. None could be shown."
+    }
+    val count = channel.notifications.coerceAtLeast(1)
+    return "Heart Rate Measurement notifications: $count."
 }
 
 private fun contactLabel(contact: SensorContact): String? = when (contact) {

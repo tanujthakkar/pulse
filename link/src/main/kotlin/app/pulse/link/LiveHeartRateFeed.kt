@@ -1,5 +1,6 @@
 package app.pulse.link
 
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
@@ -19,6 +20,11 @@ class LiveHeartRateFeed {
     private val latestOut = MutableStateFlow<LiveHeartRate?>(null)
     val latest: StateFlow<LiveHeartRate?> = latestOut.asStateFlow()
 
+    private val channelOut = MutableStateFlow(HeartRateChannel())
+
+    /** Subscribe state copied from the open session. Not a command. */
+    val channel: StateFlow<HeartRateChannel> = channelOut.asStateFlow()
+
     private val samplesOut = MutableSharedFlow<LiveHeartRate>(
         extraBufferCapacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -30,7 +36,12 @@ class LiveHeartRateFeed {
         samplesOut.tryEmit(sample)
     }
 
+    fun applyChannel(channel: HeartRateChannel) {
+        channelOut.value = channel
+    }
+
     fun clear() {
         latestOut.value = null
+        channelOut.value = HeartRateChannel()
     }
 }

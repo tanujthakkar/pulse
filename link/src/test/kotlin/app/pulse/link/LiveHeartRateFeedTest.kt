@@ -1,5 +1,6 @@
 package app.pulse.link
 
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import app.pulse.ble.SensorContact
 import kotlinx.coroutines.Dispatchers
@@ -21,8 +22,11 @@ class LiveHeartRateFeedTest {
         feed.publish(second)
         assertEquals(second, feed.latest.value)
         assertEquals(listOf(first, second), seen)
+        feed.applyChannel(HeartRateChannel(subscribed = true, notifications = 4))
+        assertEquals(HeartRateChannel(subscribed = true, notifications = 4), feed.channel.value)
         feed.clear()
         assertNull(feed.latest.value)
+        assertEquals(HeartRateChannel(), feed.channel.value)
         job.cancel()
     }
 

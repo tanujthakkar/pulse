@@ -4,8 +4,11 @@ import java.util.ArrayDeque
 import java.util.UUID
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * One strap link: connect, discover, request MTU, subscribe, then notifications.
@@ -97,6 +100,15 @@ class GattSession internal constructor(
 
     /** Parsed Heart Rate Measurement notifications. Nothing is written to disk. */
     val heartRate: SharedFlow<LiveHeartRate> = heartRateOut.asSharedFlow()
+
+    private val heartRateChannelOut = MutableStateFlow(HeartRateChannel())
+
+    /**
+     * Subscribe result and notification count for Heart Rate Measurement.
+     * Updated when the descriptor succeeds or a notification arrives.
+     * This session does not write a realtime-enable command.
+     */
+    val heartRateChannel: StateFlow<HeartRateChannel> = heartRateChannelOut.asStateFlow()
 
     init {
         radio.listener = object : RadioListener {
@@ -367,7 +379,7 @@ class GattSession internal constructor(
             return
         }
         if (op.characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
-            heartRateChannelUp = true
+            markHeartRateSubscribed()
         }
         clearInFlight(GattStatus.SUCCESS)
         if (phase == SessionPhase.CLOSING) {
@@ -418,13 +430,28 @@ class GattSession internal constructor(
         opLog.mark("NOTIFY $characteristic bytes=${value.size}")
         log.log("NOTIFY $characteristic bytes=${value.size}")
         if (characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
+            noteHeartRateNotification()
             val sample = StandardHeartRateParser.parse(value, nowMillis())
             if (sample != null) {
-                heartRateChannelUp = true
                 heartRateOut.tryEmit(sample)
             }
         }
         events.onNotification(characteristic, value)
+    }
+
+    private fun markHeartRateSubscribed() {
+        heartRateChannelUp = true
+        val current = heartRateChannelOut.value
+        if (!current.subscribed) heartRateChannelOut.value = current.copy(subscribed = true)
+    }
+
+    private fun noteHeartRateNotification() {
+        heartRateChannelUp = true
+        val current = heartRateChannelOut.value
+        heartRateChannelOut.value = current.copy(
+            subscribed = true,
+            notifications = current.notifications + 1,
+        )
     }
 
     private fun heartRateDiscovered(discovered: DiscoveredGatt): Boolean {
@@ -473,6 +500,7 @@ class GattSession internal constructor(
         phase = SessionPhase.CLOSED
         closeReason = reason
         connected = false
+        heartRateChannelOut.value = HeartRateChannel()
         alarm?.cancel()
         timeoutToken += 1
         inFlight = null

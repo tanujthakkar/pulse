@@ -28,3 +28,15 @@ enum class SensorContact {
     NOT_DETECTED,
     DETECTED,
 }
+
+/**
+ * Heart Rate Measurement (`2A37`) as this phone has seen it.
+ *
+ * [subscribed] is true after the notify descriptor write succeeds.
+ * [notifications] counts notifications that arrived, including one the
+ * parser rejected. Neither field sends a command.
+ */
+data class HeartRateChannel(
+    val subscribed: Boolean = false,
+    val notifications: Int = 0,
+)
