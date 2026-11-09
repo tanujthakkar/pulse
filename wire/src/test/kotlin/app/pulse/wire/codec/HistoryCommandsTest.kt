@@ -123,4 +123,38 @@ class HistoryCommandsTest {
         assertFalse(HistoryAckGate.maySend())
         assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
     }
+
+    @Test
+    fun specialAndAllOnesTokensAreNotSendable() {
+        val ordinary = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        assertTrue(HistoryAckCommand.sendable(ordinary))
+        assertFalse(HistoryAckCommand.sendable(ByteArray(8) { 0xFF.toByte() }))
+        assertFalse(HistoryAckCommand.sendable(ByteArray(7)))
+        assertFalse(
+            HistoryAckCommand.sendable(
+                byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 1, 0, 0, 0),
+            ),
+        )
+        assertFalse(
+            HistoryAckCommand.sendable(
+                byteArrayOf(
+                    0xFE.toByte(),
+                    0xFE.toByte(),
+                    0xFE.toByte(),
+                    0xFE.toByte(),
+                    0xFD.toByte(),
+                    0xFD.toByte(),
+                    0xFD.toByte(),
+                    0xFD.toByte(),
+                ),
+            ),
+        )
+        HistoryAckGate.debugRequested = true
+        try {
+            assertFalse(HistoryAckGate.maySend())
+        } finally {
+            HistoryAckGate.debugRequested = false
+        }
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+    }
 }

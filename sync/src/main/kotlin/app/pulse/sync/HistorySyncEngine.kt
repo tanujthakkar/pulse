@@ -54,6 +54,7 @@ class HistorySyncEngine(
     private val onFinished: (SessionOutcome) -> Unit = {},
     private val onStreamPulse: () -> Unit = {},
     private val onProgress: (SyncSnapshot) -> Unit = {},
+    private val onDurableChunk: (DurableChunk) -> Unit = {},
 ) {
     val specVersion: String = ProtocolSpecVersion.CURRENT
 
@@ -412,6 +413,21 @@ class HistorySyncEngine(
         )
         handledTokens += tokenKey(kept)
         if (receipt.duplicate) chunksDuplicate += 1 else chunksCommitted += 1
+        val stored = try {
+            store.persistedChunk(session, kept)
+        } catch (error: Exception) {
+            null
+        }
+        if (stored != null && stored.ackedAt == null && HistoryAckCommand.sendable(kept)) {
+            onDurableChunk(
+                DurableChunk(
+                    chunkId = stored.chunkId,
+                    sessionId = stored.sessionId,
+                    token = kept.copyOf(),
+                    sampleCount = stored.sampleCount,
+                ),
+            )
+        }
         refreshSaved()
         publish()
         if (!active || !ackEnabled()) return

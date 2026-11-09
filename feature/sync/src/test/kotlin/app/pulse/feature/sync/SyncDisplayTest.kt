@@ -26,6 +26,23 @@ class SyncDisplayTest {
         assertFalse(ui.outcomeIsError)
         assertNull(ui.notice)
         assertTrue(ui.canSync)
+        assertEquals("History acknowledgement is off. Sync does not send it.", ui.ackWarning)
+        assertNull(ui.ackPreview)
+        assertFalse(ui.canArm)
+        assertFalse(ui.canSend)
+    }
+
+    @Test
+    fun anOfferedChunkCanBeArmedAndIsNotSentByThePreview() {
+        val waiting = syncUi(SyncActivity(ackSamples = 35))
+        assertTrue(waiting.ackWarning.contains("reclaim"))
+        assertEquals("Not armed. Saved chunk waiting. Layout-18 rows in that chunk: 35.", waiting.ackPreview)
+        assertTrue(waiting.canArm)
+        assertFalse(waiting.canSend)
+        val armed = syncUi(SyncActivity(ackSamples = 35, ackArmed = true))
+        assertEquals("Armed. Saved chunk waiting. Layout-18 rows in that chunk: 35.", armed.ackPreview)
+        assertFalse(armed.canArm)
+        assertTrue(armed.canSend)
     }
 
     @Test

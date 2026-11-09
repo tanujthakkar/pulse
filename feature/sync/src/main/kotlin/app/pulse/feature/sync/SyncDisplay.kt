@@ -1,6 +1,7 @@
 package app.pulse.feature.sync
 
 import app.pulse.sync.HistoryLimits
+import app.pulse.sync.OneShotAck
 import app.pulse.sync.PhoneTime
 import app.pulse.sync.SessionOutcome
 import app.pulse.sync.SyncActivity
@@ -18,6 +19,11 @@ data class SyncUi(
     val time: String,
     val notice: String?,
     val canSync: Boolean,
+    val ackWarning: String,
+    val ackPreview: String?,
+    val ackStatus: String?,
+    val canArm: Boolean,
+    val canSend: Boolean,
 )
 
 fun syncUi(activity: SyncActivity): SyncUi {
@@ -36,7 +42,27 @@ fun syncUi(activity: SyncActivity): SyncUi {
         time = if (activity.running) IDLE_MARK else formatSyncTime(activity.finishedAt),
         notice = activity.blocked,
         canSync = !activity.running,
+        ackWarning = ackWarning(activity),
+        ackPreview = ackPreview(activity),
+        ackStatus = activity.ackNote,
+        canArm = activity.ackSamples != null && !activity.ackArmed && !activity.running,
+        canSend = activity.ackArmed && activity.ackSamples != null && !activity.running,
     )
+}
+
+private fun ackWarning(activity: SyncActivity): String {
+    if (activity.ackSamples == null) {
+        return "History acknowledgement is off. Sync does not send it."
+    }
+    return "A successful acknowledgement can let the strap reclaim that history. " +
+        "Arming does not send. Send is one command, then off, and only for hello firmware " +
+        "${OneShotAck.FIRMWARE}."
+}
+
+private fun ackPreview(activity: SyncActivity): String? {
+    val samples = activity.ackSamples ?: return null
+    val state = if (activity.ackArmed) "Armed." else "Not armed."
+    return "$state Saved chunk waiting. Layout-18 rows in that chunk: $samples."
 }
 
 /** End-token counts for this attempt. New means stored for the first time. */

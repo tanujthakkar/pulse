@@ -22,6 +22,8 @@ fun SyncScreen(
     onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "Sync",
+    onArmAck: () -> Unit = {},
+    onSendAck: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -121,6 +123,45 @@ fun SyncScreen(
                 .testTag("sync_now"),
         ) {
             Text("Sync now")
+        }
+        Text(
+            text = ui.ackWarning,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .testTag("sync_ack_warning"),
+        )
+        val preview = ui.ackPreview
+        if (preview != null) {
+            Text(
+                text = preview,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.testTag("sync_ack_preview"),
+            )
+        }
+        val ackStatus = ui.ackStatus
+        if (ackStatus != null) {
+            Text(
+                text = ackStatus,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.testTag("sync_ack_status"),
+            )
+        }
+        if (ui.canArm) {
+            Button(
+                onClick = onArmAck,
+                modifier = Modifier.testTag("sync_ack_arm"),
+            ) {
+                Text("Arm one acknowledgement")
+            }
+        }
+        if (ui.canSend) {
+            Button(
+                onClick = onSendAck,
+                modifier = Modifier.testTag("sync_ack_send"),
+            ) {
+                Text("Send one acknowledgement")
+            }
         }
     }
 }

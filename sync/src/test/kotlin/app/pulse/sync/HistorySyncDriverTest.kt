@@ -1,14 +1,18 @@
 package app.pulse.sync
 
 import app.pulse.testing.fakestrap.FakeStrap
+import app.pulse.testing.fakestrap.ScriptChunk
 import app.pulse.testing.fakestrap.StrapScript
+import app.pulse.testing.fakestrap.sampleRecord
 import app.pulse.wire.codec.ClockCommand
 import app.pulse.wire.codec.DataRangeCommand
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.FrameCodec
 import app.pulse.wire.codec.HistoryAckCommand
 import app.pulse.wire.codec.HistoryAckGate
+import app.pulse.wire.codec.PacketType
 import java.util.ArrayDeque
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -80,7 +84,83 @@ class HistorySyncDriverTest {
         assertEquals(0, driver.activity.savedSamples)
         assertEquals(1, driver.activity.savedChunks)
         assertNull(driver.activity.outcome)
+        assertNull(driver.activity.ackSamples)
+        assertFalse(driver.activity.ackArmed)
         assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
+    fun oneShotSendsTheStoredTokenOnceAfterArmAndThenStaysOff() {
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val harness = runningChunk(token)
+        assertEquals(1, harness.driver.activity.ackSamples)
+        assertFalse(harness.driver.activity.ackArmed)
+        assertFalse(harness.driver.armOneShot())
+        assertEquals(0, harness.ackWrites())
+        harness.finishQuiet()
+        assertEquals(SessionOutcome.WATCHDOG, harness.driver.activity.outcome)
+        assertEquals(1, harness.driver.activity.ackSamples)
+        assertFalse(harness.driver.activity.ackArmed)
+        assertTrue(harness.driver.armOneShot())
+        assertTrue(harness.driver.activity.ackArmed)
+        assertEquals(0, harness.ackWrites())
+        harness.driver.sendOneShot(OneShotAck.FIRMWARE)
+        assertEquals(1, harness.ackWrites())
+        val decoded = FrameCodec.decode(harness.link.written.last()) as DecodeResult.Ok
+        assertEquals(HistoryAckCommand.NUMBER, decoded.frame.command)
+        assertEquals(PacketType.COMMAND, decoded.frame.packetType)
+        assertEquals(HistoryAckCommand.PREFIX, decoded.frame.tail[0].toInt() and 0xFF)
+        assertArrayEquals(token, decoded.frame.tail.copyOfRange(1, 9))
+        assertEquals(1_700_000_000L, harness.store.chunks.single().ackedAt)
+        assertFalse(harness.driver.activity.ackArmed)
+        assertNull(harness.driver.activity.ackSamples)
+        harness.driver.sendOneShot(OneShotAck.FIRMWARE)
+        assertEquals(1, harness.ackWrites())
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+        assertFalse(HistoryAckGate.debugRequested)
+    }
+
+    @Test
+    fun oneShotRefusesADifferentFirmwareAMissingChunkAndAFailedWrite() {
+        val token = byteArrayOf(4, 3, 2, 1, 8, 7, 6, 5)
+        val wrongFirmware = runningChunk(token)
+        wrongFirmware.finishQuiet()
+        assertTrue(wrongFirmware.driver.armOneShot())
+        wrongFirmware.driver.sendOneShot("50.42.1.0")
+        assertEquals(0, wrongFirmware.ackWrites())
+        assertNull(wrongFirmware.store.chunks.single().ackedAt)
+        assertFalse(wrongFirmware.driver.armOneShot())
+
+        val missing = runningChunk(token)
+        missing.finishQuiet()
+        assertTrue(missing.driver.armOneShot())
+        missing.store.chunks.clear()
+        missing.driver.sendOneShot(OneShotAck.FIRMWARE)
+        assertEquals(0, missing.ackWrites())
+
+        val failedWrite = runningChunk(token)
+        failedWrite.finishQuiet()
+        assertTrue(failedWrite.driver.armOneShot())
+        failedWrite.link.rejectWrite = true
+        failedWrite.driver.sendOneShot(OneShotAck.FIRMWARE)
+        assertEquals(0, failedWrite.ackWrites())
+        assertNull(failedWrite.store.chunks.single().ackedAt)
+        failedWrite.link.rejectWrite = false
+        failedWrite.driver.sendOneShot(OneShotAck.FIRMWARE)
+        assertEquals(0, failedWrite.ackWrites())
+        assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
+    fun disconnectDropsTheOneShotOffer() {
+        val harness = runningChunk(byteArrayOf(1, 1, 1, 1, 2, 2, 2, 2))
+        assertEquals(1, harness.driver.activity.ackSamples)
+        harness.link.down()
+        assertEquals(SessionOutcome.DISCONNECTED, harness.driver.activity.outcome)
+        assertNull(harness.driver.activity.ackSamples)
+        assertFalse(harness.driver.armOneShot())
+        assertEquals(0, harness.ackWrites())
     }
 
     @Test
@@ -160,6 +240,45 @@ class HistorySyncDriverTest {
         )
     }
 
+    private fun runningChunk(token: ByteArray): OneShotHarness {
+        val strap = FakeStrap(
+            StrapScript(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))),
+        )
+        val link = ScriptedHistoryLink(strap)
+        val store = MemorySyncStore()
+        var now = 0L
+        val tasks = mutableListOf<() -> Unit>()
+        val driver = HistorySyncDriver(
+            link = link,
+            store = store,
+            phone = PhoneClock { PhoneTime(1_700_000_000L, 0) },
+            schedule = HistoryScheduler { _, task ->
+                tasks += task
+                HistorySubscription { }
+            },
+            nowMs = { now },
+        )
+        driver.syncNow()
+        link.pump { driver.running }
+        return OneShotHarness(driver, link, store, tasks) { now = it }
+    }
+
+    private inner class OneShotHarness(
+        val driver: HistorySyncDriver,
+        val link: ScriptedHistoryLink,
+        val store: MemorySyncStore,
+        private val tasks: List<() -> Unit>,
+        private val setNow: (Long) -> Unit,
+    ) {
+        fun finishQuiet() {
+            setNow(HistoryLimits.WATCHDOG_MS)
+            tasks.last().invoke()
+            assertFalse(driver.running)
+        }
+
+        fun ackWrites(): Int = link.written.count { commandOf(it) == HistoryAckCommand.NUMBER }
+    }
+
     private fun commandOf(frame: ByteArray): Int {
         val decoded = FrameCodec.decode(frame) as DecodeResult.Ok
         return decoded.frame.command
@@ -175,7 +294,10 @@ private class ScriptedHistoryLink(
     private var onNotification: (String, ByteArray) -> Unit = { _, _ -> }
     private var onDown: () -> Unit = {}
 
+    var rejectWrite: Boolean = false
+
     override fun write(frame: ByteArray): Boolean {
+        if (rejectWrite) return false
         written += frame.copyOf()
         outbox += frame
         return true

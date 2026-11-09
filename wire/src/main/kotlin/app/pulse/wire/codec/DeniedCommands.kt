@@ -44,10 +44,9 @@ object DeniedCommands {
 /**
  * History acknowledgement (command 23).
  *
- * Spec §8 and project rule 13: live acknowledgements stay off until a Pulse
- * capture confirms the metadata kind byte and the 8-byte token. [maySend]
- * stays false until that confirmation is compiled in. [debugRequested] does
- * not turn sending on by itself.
+ * Spec §8 and project rule 13. [OFFSETS_CONFIRMED] stays false, so [maySend]
+ * stays false. A debug one-shot does not use this gate and does not change
+ * the constant. [debugRequested] does not turn sending on by itself.
  */
 object HistoryAckGate {
     const val NUMBER: Int = 23

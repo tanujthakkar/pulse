@@ -76,7 +76,23 @@ interface SyncStore {
      * on the current attempt.
      */
     fun savedCounts(): SavedCounts
+
+    /**
+     * The chunk already stored for [token] on the device that owns [sessionId].
+     *
+     * Null when that session or chunk is absent. This does not send an
+     * acknowledgement and does not create a row.
+     */
+    fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk?
 }
+
+/** A chunk row that survived [SyncStore.commitChunk]. */
+data class PersistedChunk(
+    val chunkId: Long,
+    val sessionId: Long,
+    val sampleCount: Int,
+    val ackedAt: Long?,
+)
 
 /** Local-storage totals from [SyncStore.savedCounts]. */
 data class SavedCounts(

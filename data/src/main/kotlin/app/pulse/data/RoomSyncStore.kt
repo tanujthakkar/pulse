@@ -2,6 +2,7 @@ package app.pulse.data
 
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.HISTORY_TOKEN_BYTES
+import app.pulse.sync.PersistedChunk
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
 import app.pulse.sync.SavedCounts
@@ -134,6 +135,18 @@ class RoomSyncStore(
         SavedCounts(
             samples = database.samples().count(),
             chunks = database.chunks().count(),
+        )
+    }
+
+    override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = onIo {
+        if (token.size != HISTORY_TOKEN_BYTES) return@onIo null
+        val session = database.sessions().find(sessionId) ?: return@onIo null
+        val row = database.chunks().find(session.deviceId, token.copyOf()) ?: return@onIo null
+        PersistedChunk(
+            chunkId = row.id,
+            sessionId = row.sessionId,
+            sampleCount = row.sampleCount,
+            ackedAt = row.ackedAt,
         )
     }
 

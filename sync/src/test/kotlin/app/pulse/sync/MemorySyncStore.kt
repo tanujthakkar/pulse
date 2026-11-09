@@ -100,6 +100,18 @@ class MemorySyncStore : SyncStore {
         chunks = chunks.size,
     )
 
+    override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? {
+        if (token.size != HISTORY_TOKEN_BYTES) return null
+        val session = sessions.find { it.id == sessionId } ?: return null
+        val chunk = chunks.find { it.device == session.device && it.token.contentEquals(token) } ?: return null
+        return PersistedChunk(
+            chunkId = chunk.id,
+            sessionId = chunk.sessionId,
+            sampleCount = chunk.samples.size,
+            ackedAt = chunk.ackedAt,
+        )
+    }
+
     override fun markAcknowledged(sessionId: Long, token: ByteArray, ackedUnixSeconds: Long) {
         val session = sessions.first { it.id == sessionId }
         val chunk = chunks.find { it.device == session.device && it.token.contentEquals(token) }

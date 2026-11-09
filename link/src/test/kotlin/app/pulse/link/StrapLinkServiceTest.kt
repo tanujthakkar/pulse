@@ -11,6 +11,7 @@ import app.pulse.ble.CloseReason
 import app.pulse.ble.DeviceBond
 import app.pulse.ble.StrapSighting
 import app.pulse.sync.ChunkReceipt
+import app.pulse.sync.PersistedChunk
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
 import app.pulse.sync.SavedCounts
@@ -225,6 +226,8 @@ class StrapLinkServiceTest {
         ) = error("not used")
 
         override fun savedCounts(): SavedCounts = error("not used")
+
+        override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = error("not used")
     }
 
     private fun foregroundType(shadow: ShadowService): Int {

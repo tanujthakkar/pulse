@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import app.pulse.data.DataBuildInfo
 import app.pulse.link.HistorySyncHost
 import app.pulse.link.LinkBuildInfo
+import app.pulse.link.StrapLink
 import app.pulse.sync.SyncActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -17,11 +18,13 @@ import kotlinx.coroutines.flow.StateFlow
  * its time. That host, and the history engine inside it, are retained by
  * [app.pulse.link.StrapLinkService], so pausing or stopping the Activity does
  * not cancel the attempt. The button stays disabled while the attempt runs.
- * Acknowledgements stay behind the metadata gate.
+ * Production acknowledgements stay behind the metadata gate. One acknowledgement
+ * can be armed and sent from this screen, and that consent is off until the tap.
  */
 @HiltViewModel
 class SyncViewModel @Inject constructor(
     private val sync: HistorySyncHost,
+    private val link: StrapLink,
 ) : ViewModel() {
     val title: String = "Sync"
 
@@ -32,5 +35,13 @@ class SyncViewModel @Inject constructor(
 
     fun syncNow() {
         sync.syncNow()
+    }
+
+    fun armOneShot() {
+        sync.armOneShot()
+    }
+
+    fun sendOneShot() {
+        sync.sendOneShot(link.snapshot().helloFirmware)
     }
 }

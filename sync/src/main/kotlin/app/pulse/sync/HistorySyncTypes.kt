@@ -162,4 +162,27 @@ data class SyncActivity(
     val outcome: SessionOutcome? = null,
     val finishedAt: PhoneTime? = null,
     val blocked: String? = null,
+    val ackSamples: Int? = null,
+    val ackArmed: Boolean = false,
+    val ackSpent: Boolean = false,
+    val ackNote: String? = null,
 )
+
+/**
+ * One chunk this process has stored and may acknowledge once.
+ *
+ * [token] is the original end-token bytes. It is not rebuilt.
+ */
+data class DurableChunk(
+    val chunkId: Long,
+    val sessionId: Long,
+    val token: ByteArray,
+    val sampleCount: Int,
+)
+
+/** Firmware whose end-token offsets this one-shot is allowed to use. */
+object OneShotAck {
+    const val FIRMWARE: String = "50.43.1.0"
+
+    fun allowsFirmware(firmware: String?): Boolean = firmware == FIRMWARE
+}

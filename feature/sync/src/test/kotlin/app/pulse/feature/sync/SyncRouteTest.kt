@@ -10,9 +10,16 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import app.pulse.ble.BondBegin
+import app.pulse.ble.DeviceBond
 import app.pulse.link.HistorySyncHost
+import app.pulse.link.LinkAlarm
+import app.pulse.link.LinkClock
+import app.pulse.link.LinkPorts
 import app.pulse.link.StrapCommandPort
+import app.pulse.link.StrapLink
 import app.pulse.sync.ChunkReceipt
+import app.pulse.sync.PersistedChunk
 import app.pulse.sync.PhoneTime
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
@@ -36,7 +43,10 @@ class SyncRouteTest {
 
     @Test
     fun syncNowWithoutALinkShowsTheNoticeAndLeavesTheButtonEnabled() {
-        val viewModel = SyncViewModel(HistorySyncHost(StrapCommandPort(), UnusedSyncStore()))
+        val viewModel = SyncViewModel(
+            HistorySyncHost(StrapCommandPort(), UnusedSyncStore()),
+            quietLink(),
+        )
         compose.setContent { SyncRoute(viewModel) }
         compose.onNodeWithTag("sync_state").assertTextEquals("Idle")
         compose.onNodeWithTag("sync_chunks").assertTextEquals(chunkLine(SyncActivity()))
@@ -50,6 +60,11 @@ class SyncRouteTest {
         compose.onNodeWithTag("sync_notice").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("sync_now").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("sync_busy").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextEquals(
+            "History acknowledgement is off. Sync does not send it.",
+        )
+        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
         assertEquals("0:0", viewModel.modulePins)
     }
 
@@ -124,7 +139,48 @@ class SyncRouteTest {
             }
         }
     }
+
+    @Test
+    fun armingDoesNotSend() {
+        var arms = 0
+        var sends = 0
+        compose.setContent {
+            SyncScreen(
+                ui = syncUi(SyncActivity(ackSamples = 35)),
+                onSyncNow = {},
+                onArmAck = { arms += 1 },
+                onSendAck = { sends += 1 },
+            )
+        }
+        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_arm").performScrollTo().performClick()
+        assertEquals(1, arms)
+        assertEquals(0, sends)
+    }
 }
+
+private fun quietLink(): StrapLink = StrapLink(
+    ports = object : LinkPorts {
+        override fun startScan() = Unit
+
+        override fun stopScan() = Unit
+
+        override fun bondOf(address: String): DeviceBond = DeviceBond.ABSENT
+
+        override fun beginBond(address: String): BondBegin = BondBegin.NOT_STARTED
+
+        override fun cancelBond() = Unit
+
+        override fun openSession(address: String) = Unit
+
+        override fun closeSession() = Unit
+
+        override fun watchHeartRate(address: String) = Unit
+    },
+    clock = object : LinkClock {
+        override fun after(delayMs: Long, task: () -> Unit): LinkAlarm = LinkAlarm { }
+    },
+)
 
 private class UnusedSyncStore : SyncStore {
     override fun openSession(
@@ -155,4 +211,6 @@ private class UnusedSyncStore : SyncStore {
         ) = error("unused")
 
         override fun savedCounts(): SavedCounts = error("unused")
+
+        override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = error("unused")
 }

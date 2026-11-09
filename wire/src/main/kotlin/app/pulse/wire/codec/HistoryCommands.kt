@@ -85,7 +85,7 @@ object HistoryStartCommand {
  * Command 23 body: `01` plus the original 8 token bytes.
  *
  * [body] copies [token]. It does not rebuild the token from a timestamp or
- * from a saved cursor. Sending still goes through [HistoryAckGate].
+ * from a saved cursor. [sendable] does not open [HistoryAckGate].
  */
 object HistoryAckCommand {
     const val NUMBER: Int = HistoryAckGate.NUMBER
@@ -98,6 +98,23 @@ object HistoryAckCommand {
         out[0] = PREFIX.toByte()
         token.copyInto(out, destinationOffset = 1)
         return out
+    }
+
+    /**
+     * True when [token] may be copied into one command 23 body.
+     *
+     * Eight `0xFF` bytes, a first word of `0xFFFFFFFF`, and the special
+     * words `0xFEFEFEFE` and `0xFDFDFDFD` are wire controls. They are not
+     * echoed. This does not open [HistoryAckGate].
+     */
+    fun sendable(token: ByteArray): Boolean {
+        if (!HistoryMetadata.echoable(token)) return false
+        val first = readU32Le(token, 0)
+        val second = readU32Le(token, 4)
+        if (first == 0xFFFF_FFFFL) return false
+        if (first == 0xFEFE_FEFEL || second == 0xFEFE_FEFEL) return false
+        if (first == 0xFDFD_FDFDL || second == 0xFDFD_FDFDL) return false
+        return true
     }
 }
 
