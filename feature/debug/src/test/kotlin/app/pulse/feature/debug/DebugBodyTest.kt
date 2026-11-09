@@ -36,6 +36,14 @@ class DebugBodyTest {
         assertTrue(body.contains("Stored device AA:BB:CC:DD:EE:FF."))
         assertFalse(body.contains("SECRET"))
         assertFalse(body.contains("identity block"))
+        val exported = debugBody(
+            LinkSnapshot(helloFirmware = "50.43.1.0"),
+            null,
+            "Strap result 1: 1 chunks. GATT status 0 is a radio result. It is not a strap result.",
+        )
+        assertTrue(exported.contains("Strap result 1: 1"))
+        assertTrue(exported.contains("not a strap result"))
+        assertFalse(exported.contains("GATT status 0 is success"))
     }
 
     @Test

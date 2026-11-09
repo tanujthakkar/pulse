@@ -164,7 +164,7 @@ class StrapLinkServiceTest {
             ),
         )
         assertEquals(LinkPhase.LINKED, link.snapshot().phase)
-        val sync = HistorySyncHost(commands, UnusedSyncStore())
+        val sync = HistorySyncHost(commands, UnusedSyncStore(), link)
         return Fixture(link, commands, sync, written)
     }
 

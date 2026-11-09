@@ -12,7 +12,6 @@ fun SyncRoute(viewModel: SyncViewModel = hiltViewModel()) {
         ui = syncUi(activity),
         onSyncNow = viewModel::syncNow,
         title = viewModel.title,
-        onArmAck = viewModel::armOneShot,
-        onCancelAck = viewModel::cancelOneShot,
+        onAckEnabled = viewModel::setHistoryAckEnabled,
     )
 }

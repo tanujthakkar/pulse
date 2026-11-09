@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,8 +23,7 @@ fun SyncScreen(
     onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
     title: String = "Sync",
-    onArmAck: () -> Unit = {},
-    onCancelAck: () -> Unit = {},
+    onAckEnabled: (Boolean) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -131,37 +131,19 @@ fun SyncScreen(
                 .padding(top = 8.dp)
                 .testTag("sync_ack_warning"),
         )
-        val preview = ui.ackPreview
-        if (preview != null) {
-            Text(
-                text = preview,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.testTag("sync_ack_preview"),
-            )
-        }
-        val ackStatus = ui.ackStatus
-        if (ackStatus != null) {
-            Text(
-                text = ackStatus,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.testTag("sync_ack_status"),
-            )
-        }
-        if (ui.canArm) {
-            Button(
-                onClick = onArmAck,
-                modifier = Modifier.testTag("sync_ack_arm"),
-            ) {
-                Text("Arm one acknowledgement")
-            }
-        }
-        if (ui.canCancel) {
-            Button(
-                onClick = onCancelAck,
-                modifier = Modifier.testTag("sync_ack_cancel"),
-            ) {
-                Text("Cancel acknowledgement")
-            }
-        }
+        Text(
+            text = "Acknowledge saved history",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Switch(
+            checked = ui.historyAckEnabled,
+            onCheckedChange = onAckEnabled,
+            modifier = Modifier.testTag("sync_ack_switch"),
+        )
+        Text(
+            text = ui.ackStatus,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.testTag("sync_ack_status"),
+        )
     }
 }

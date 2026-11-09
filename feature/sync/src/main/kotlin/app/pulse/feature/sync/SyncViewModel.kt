@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import app.pulse.data.DataBuildInfo
 import app.pulse.link.HistorySyncHost
 import app.pulse.link.LinkBuildInfo
-import app.pulse.link.StrapLink
 import app.pulse.sync.SyncActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -18,14 +17,13 @@ import kotlinx.coroutines.flow.StateFlow
  * its time. That host, and the history engine inside it, are retained by
  * [app.pulse.link.StrapLinkService], so pausing or stopping the Activity does
  * not cancel the attempt. The button stays disabled while the attempt runs.
- * Production acknowledgements stay behind the metadata gate. One acknowledgement
- * can be armed here before Sync now. That consent is off until the tap and is
- * not a send button.
+ * Production acknowledgements stay off [app.pulse.wire.codec.HistoryAckGate].
+ * Saved chunks are acknowledged when the kill switch is on and hello firmware
+ * is 50.43.1.0. The switch is on until the user turns it off.
  */
 @HiltViewModel
 class SyncViewModel @Inject constructor(
     private val sync: HistorySyncHost,
-    private val link: StrapLink,
 ) : ViewModel() {
     val title: String = "Sync"
 
@@ -38,11 +36,7 @@ class SyncViewModel @Inject constructor(
         sync.syncNow()
     }
 
-    fun armOneShot() {
-        sync.armOneShot(link.snapshot().helloFirmware)
-    }
-
-    fun cancelOneShot() {
-        sync.cancelOneShot()
+    fun setHistoryAckEnabled(enabled: Boolean) {
+        sync.setHistoryAckEnabled(enabled)
     }
 }

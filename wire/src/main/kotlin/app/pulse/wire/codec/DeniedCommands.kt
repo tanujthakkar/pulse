@@ -45,8 +45,9 @@ object DeniedCommands {
  * History acknowledgement (command 23).
  *
  * Spec §8 and project rule 13. [OFFSETS_CONFIRMED] stays false, so [maySend]
- * stays false. A debug one-shot does not use this gate and does not change
- * the constant. [debugRequested] does not turn sending on by itself.
+ * stays false. History sync acknowledges 50.43.1.0 through its own firmware
+ * check and does not change this constant. [debugRequested] does not turn
+ * sending on by itself.
  */
 object HistoryAckGate {
     const val NUMBER: Int = 23

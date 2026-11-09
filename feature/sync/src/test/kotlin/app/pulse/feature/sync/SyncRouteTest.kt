@@ -4,6 +4,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -19,7 +21,6 @@ import app.pulse.link.LinkClock
 import app.pulse.link.LinkPorts
 import app.pulse.link.StrapCommandPort
 import app.pulse.link.StrapLink
-import app.pulse.sync.AckPhase
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.PersistedChunk
 import app.pulse.sync.PhoneTime
@@ -46,8 +47,7 @@ class SyncRouteTest {
     @Test
     fun syncNowWithoutALinkShowsTheNoticeAndLeavesTheButtonEnabled() {
         val viewModel = SyncViewModel(
-            HistorySyncHost(StrapCommandPort(), UnusedSyncStore()),
-            quietLink(),
+            HistorySyncHost(StrapCommandPort(), UnusedSyncStore(), quietLink()),
         )
         compose.setContent { SyncRoute(viewModel) }
         compose.onNodeWithTag("sync_state").assertTextEquals("Idle")
@@ -65,12 +65,14 @@ class SyncRouteTest {
         compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextEquals(
             syncUi(SyncActivity()).ackWarning,
         )
-        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextEquals(
-            "History acknowledgement is off. Sync does not send it.",
+        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextContains(
+            "Strap result 1: 0",
+            substring = true,
         )
-        compose.onNodeWithTag("sync_ack_arm").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("sync_ack_status").assertTextContains("GATT status 0", substring = true)
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOn()
+        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
         compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
-        compose.onNodeWithTag("sync_ack_cancel").assertDoesNotExist()
         assertEquals("0:0", viewModel.modulePins)
     }
 
@@ -147,35 +149,34 @@ class SyncRouteTest {
     }
 
     @Test
-    fun armingDoesNotSend() {
-        var arms = 0
+    fun theSwitchReportsTheNewValueAndDoesNotSend() {
+        var enabled = true
         compose.setContent {
             SyncScreen(
-                ui = syncUi(SyncActivity()),
+                ui = syncUi(SyncActivity(historyAckEnabled = enabled)),
                 onSyncNow = {},
-                onArmAck = { arms += 1 },
+                onAckEnabled = { enabled = it },
             )
         }
         compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
-        compose.onNodeWithTag("sync_ack_arm").performScrollTo().performClick()
-        assertEquals(1, arms)
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOn().performClick()
+        assertEquals(false, enabled)
+        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextContains("reclaim", substring = true)
     }
 
     @Test
-    fun cancelIsOfferedWhileArmedAndSendIsAbsent() {
-        var cancels = 0
+    fun anOffSwitchDescribesSavingWithoutCommand23() {
         compose.setContent {
             SyncScreen(
-                ui = syncUi(SyncActivity(ackPhase = AckPhase.ARMED)),
+                ui = syncUi(SyncActivity(historyAckEnabled = false)),
                 onSyncNow = {},
-                onCancelAck = { cancels += 1 },
             )
         }
-        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
-        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
-        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextContains("reclaim", substring = true)
-        compose.onNodeWithTag("sync_ack_cancel").performScrollTo().performClick()
-        assertEquals(1, cancels)
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOff()
+        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextContains(
+            "does not send command 23",
+            substring = true,
+        )
     }
 }
 

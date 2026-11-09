@@ -1,8 +1,8 @@
 package app.pulse.feature.sync
 
-import app.pulse.sync.AckPhase
+import app.pulse.sync.AckKind
+import app.pulse.sync.HistoryAckFirmware
 import app.pulse.sync.HistoryLimits
-import app.pulse.sync.OneShotAck
 import app.pulse.sync.PhoneTime
 import app.pulse.sync.SessionOutcome
 import app.pulse.sync.SyncActivity
@@ -29,28 +29,15 @@ class SyncDisplayTest {
         assertFalse(ui.outcomeIsError)
         assertNull(ui.notice)
         assertTrue(ui.canSync)
+        assertTrue(ui.historyAckEnabled)
         assertTrue(ui.ackWarning.contains("reclaim"))
-        assertTrue(ui.ackWarning.contains(OneShotAck.FIRMWARE))
-        assertEquals("History acknowledgement is off. Sync does not send it.", ui.ackStatus)
-        assertNull(ui.ackPreview)
-        assertTrue(ui.canArm)
-        assertFalse(ui.canCancel)
-    }
-
-    @Test
-    fun armedConsentCanBeCancelledAndDoesNotOfferASendButton() {
-        val armed = syncUi(SyncActivity(ackPhase = AckPhase.ARMED))
-        assertTrue(armed.ackWarning.contains("reclaim"))
-        assertEquals("Armed for the next sync. Nothing has been sent.", armed.ackStatus)
-        assertFalse(armed.canArm)
-        assertTrue(armed.canCancel)
-        assertTrue(armed.canSync)
-        val waiting = syncUi(
-            SyncActivity(ackPhase = AckPhase.WAITING, running = true, phase = SyncPhase.STREAM),
-        )
-        assertTrue(waiting.canCancel)
-        assertFalse(waiting.canSync)
-        assertTrue(waiting.ackStatus!!.contains("Nothing has been sent"))
+        assertTrue(ui.ackWarning.contains(HistoryAckFirmware.ALLOWED))
+        assertTrue(ui.ackStatus.contains("Strap result 1: 0"))
+        assertTrue(ui.ackStatus.contains("GATT status 0"))
+        assertTrue(ui.ackStatus.contains("not a strap result"))
+        val off = syncUi(SyncActivity(historyAckEnabled = false))
+        assertTrue(off.ackWarning.contains("does not send command 23"))
+        assertTrue(off.ackStatus.contains("History acknowledgement is off"))
     }
 
     @Test
@@ -59,34 +46,43 @@ class SyncDisplayTest {
             SyncActivity(
                 phase = SyncPhase.STREAM,
                 running = true,
-                ackPhase = AckPhase.HANDED_OFF,
-                ackSamples = 35,
+                ackSent = 1,
+                lastAckKind = AckKind.HANDED_OFF,
             ),
         )
-        assertEquals("Layout-18 rows in the saved chunk: 35.", handed.ackPreview)
-        assertTrue(handed.ackStatus!!.contains("passed to the radio"))
-        assertTrue(handed.ackStatus.contains("not a strap response"))
-        assertFalse(handed.ackStatus.contains("status 0"))
-        assertFalse(handed.canCancel)
-        val accepted = syncUi(SyncActivity(ackPhase = AckPhase.RESULT, ackResult = 1, ackSamples = 35))
-        assertTrue(accepted.ackStatus!!.contains("result was 1"))
+        assertTrue(handed.ackStatus.contains("passed to the radio"))
+        assertTrue(handed.ackStatus.contains("GATT status 0"))
+        assertTrue(handed.ackStatus.contains("not a strap result"))
+        assertFalse(handed.canSync)
+        val accepted = syncUi(
+            SyncActivity(
+                lastAckKind = AckKind.RESULT,
+                lastAckResult = 1,
+                ackResult1 = 1,
+                ackEligibleRecords = 35,
+            ),
+        )
+        assertTrue(accepted.ackStatus.contains("result was 1"))
         assertTrue(accepted.ackStatus.contains("does not prove"))
-        val failed = syncUi(SyncActivity(ackPhase = AckPhase.RESULT, ackResult = 0))
-        assertTrue(failed.ackStatus!!.contains("was not updated"))
-        val pending = syncUi(SyncActivity(ackPhase = AckPhase.PENDING, ackResult = 2))
-        assertTrue(pending.ackStatus!!.contains("pending"))
+        assertTrue(accepted.ackStatus.contains("35"))
+        val failed = syncUi(SyncActivity(ackResult0 = 1, lastAckKind = AckKind.RESULT, lastAckResult = 0))
+        assertTrue(failed.ackStatus.contains("was not updated"))
+        val pending = syncUi(SyncActivity(ackPending = 1))
+        assertTrue(pending.ackStatus.contains("Pending"))
         assertTrue(pending.ackStatus.contains("not success"))
         val none = syncUi(
             SyncActivity(
                 phase = SyncPhase.DONE,
-                ackPhase = AckPhase.NO_RESPONSE,
+                ackUnanswered = 1,
+                lastAckKind = AckKind.NO_RESPONSE,
                 outcome = SessionOutcome.WATCHDOG,
             ),
         )
-        assertTrue(none.ackStatus!!.contains("not a strap result"))
+        assertTrue(none.ackStatus.contains("No strap result"))
         assertNotEquals(none.outcome, none.ackStatus)
-        val refused = syncUi(SyncActivity(ackPhase = AckPhase.RADIO_REFUSED))
-        assertTrue(refused.ackStatus!!.contains("will not be retried"))
+        val refused = syncUi(SyncActivity(ackRadioRefused = 1, lastAckKind = AckKind.RADIO_REFUSED))
+        assertTrue(refused.ackStatus.contains("refused"))
+        assertTrue(refused.ackStatus.contains("Not retried"))
     }
 
     @Test

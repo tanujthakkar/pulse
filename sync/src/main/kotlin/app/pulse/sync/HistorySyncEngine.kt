@@ -36,35 +36,36 @@ import java.util.concurrent.atomic.AtomicLong
  * are not a token: they are not stored and not acknowledged. The
  * acknowledgement body is `01` plus the original token bytes.
  *
- * [ackEnabled] is the production gate. When it is false, and the one-shot
- * callback does not claim the chunk, no command 23 frame is handed to
- * [transmit]. Callers serialize [start], [onNotification], [onDisconnect],
- * and [onWatchdog].
+ * [historyAckEnabled] is the user kill switch. [firmware] is the hello version
+ * read at each acknowledgement. A chunk is acknowledged only when the switch
+ * is on, the firmware is [HistoryAckFirmware.ALLOWED], the token passes
+ * [HistoryAckCommand.sendable], [SyncStore.commitChunk] has returned, and the
+ * stored row was read back. The write uses [FrameCodec] directly. It does not
+ * call [app.pulse.wire.codec.CommandFrames] or
+ * [app.pulse.wire.codec.HistoryAckGate.maySend]. [HistoryAckGate] stays closed.
  *
- * [onDurableChunk] runs only after [SyncStore.commitChunk] has returned and
- * the stored row was read back. A true result claims the single diagnostic
- * write for this attempt. That write uses [FrameCodec] directly, opens the
- * request tracker, and does not call [app.pulse.wire.codec.CommandFrames] or
- * [app.pulse.wire.codec.HistoryAckGate.maySend]. A false result leaves the
- * production [ackEnabled] path unchanged. The two paths do not both write.
+ * One command 23 is sent per token on this attempt, including a duplicate of
+ * a row that is already stored. End-token resends and a re-entered
+ * notification do not send another. Result 0, a missing result, and a refused
+ * write do not mark the row and do not send again until a later attempt.
+ * Callers serialize [start], [onNotification], [onDisconnect], and [onWatchdog].
  *
  * Commands sent from here are clock get, clock set, data range, history start,
- * and history ack only through one of those two paths. Deny-listed cursor
- * commands are not sent.
+ * and history ack through the rule above. Deny-listed cursor commands are not
+ * sent.
  */
 class HistorySyncEngine(
     private val address: String,
     private val store: SyncStore,
     private val phone: PhoneClock,
     private val transmit: (ByteArray) -> Boolean,
-    private val ackEnabled: () -> Boolean,
+    private val historyAckEnabled: () -> Boolean = { false },
+    private val firmware: () -> String? = { null },
     private val nowMs: () -> Long = { 0L },
     private val onFinished: (SessionOutcome) -> Unit = {},
     private val onStreamPulse: () -> Unit = {},
     private val onProgress: (SyncSnapshot) -> Unit = {},
-    private val onDurableChunk: (DurableChunk) -> Boolean = { false },
-    private val onAckHandoff: (Boolean) -> Unit = {},
-    private val onAckResult: (Int) -> Unit = {},
+    private val log: (String) -> Unit = {},
 ) {
     val specVersion: String = ProtocolSpecVersion.CURRENT
 
@@ -93,6 +94,17 @@ class HistorySyncEngine(
         droppedUncommitted = droppedUncommitted,
         savedSamples = savedSamples,
         savedChunks = savedChunks,
+        ackSent = ackSent,
+        ackResult1 = ackResult1,
+        ackResult0 = ackResult0,
+        ackPending = ackPending,
+        ackUnanswered = ackUnanswered,
+        ackRadioRefused = ackRadioRefused,
+        ackSkipped = ackSkipped,
+        ackEligibleRecords = ackEligibleRecords,
+        lastAckResult = lastAckResult,
+        lastAckKind = lastAckKind,
+        ackNote = ackNote,
     )
 
     private val connection = ConnectionId(NEXT_CONNECTION.incrementAndGet())
@@ -117,7 +129,18 @@ class HistorySyncEngine(
     private var savedChunks = 0
     private var sawStart = false
     private val handledTokens = HashSet<String>()
-    private var oneShotUsed = false
+    private val openAcks = HashMap<Int, OpenAck>()
+    private var ackSent = 0
+    private var ackResult1 = 0
+    private var ackResult0 = 0
+    private var ackPending = 0
+    private var ackUnanswered = 0
+    private var ackRadioRefused = 0
+    private var ackSkipped = 0
+    private var ackEligibleRecords = 0
+    private var lastAckResult: Int? = null
+    private var lastAckKind: AckKind = AckKind.NONE
+    private var ackNote: String? = null
     private var sequence = 1
     private var sessionId: Long? = null
     private var sessionClosed = false
@@ -211,7 +234,7 @@ class HistorySyncEngine(
             SyncPhase.RANGE -> onRange(match, body)
             SyncPhase.START -> onHistoryStart(match, body)
             SyncPhase.STREAM -> if (match.command == HistoryAckCommand.NUMBER) {
-                onAckResult(match.result)
+                observeAck(match)
             }
             SyncPhase.IDLE, SyncPhase.DONE -> Unit
         }
@@ -431,83 +454,131 @@ class HistorySyncEngine(
         } catch (error: Exception) {
             null
         }
-        val oneShotClaimed = stored != null && onDurableChunk(
-            DurableChunk(
-                chunkId = stored.chunkId,
-                sessionId = stored.sessionId,
-                token = kept.copyOf(),
-                sampleCount = stored.sampleCount,
-            ),
-        )
         refreshSaved()
-        publish()
-        if (oneShotClaimed) {
-            if (!oneShotUsed) {
-                oneShotUsed = true
-                val wrote = if (active && HistoryAckCommand.sendable(kept)) {
-                    writeOneShot(session, kept)
-                } else {
-                    false
-                }
-                onAckHandoff(wrote)
-            }
+        if (stored == null) {
+            skipAck("The saved chunk could not be read back. Nothing was sent.")
             return
         }
-        if (!active || !ackEnabled()) return
-        if (!HistoryMetadata.echoable(kept)) return
-        val body = HistoryAckCommand.body(kept)
-        val seq = nextSequence()
-        val ackFrame = FrameCodec.encode(
-            headerWord = HeaderWord.COMMON_REQUEST,
-            packetType = PacketType.COMMAND,
-            sequence = seq,
-            command = HistoryAckCommand.NUMBER,
-            body = body,
-        )
-        tracker.open(connection, HistoryAckCommand.NUMBER, seq)
-        if (!transmit(ackFrame)) {
-            finish(SessionOutcome.DISCONNECTED)
-            return
-        }
-        trace += SyncTrace.Ack(kept.copyOf(), body.copyOf())
-        try {
-            store.markAcknowledged(session, kept, phone.now().unixSeconds)
-        } catch (error: Exception) {
-            finish(SessionOutcome.ABORTED)
-        }
+        acknowledge(session, kept, stored.sampleCount)
     }
 
     /**
-     * One diagnostic command 23 after a commit the callback has claimed.
+     * One command 23 for a chunk that is already durable.
      *
-     * The request is opened before the write and abandoned when the link
-     * refuses the bytes, so a later type 36 cannot be reported as this write's
-     * result. A bookkeeping failure after a successful handoff does not write
-     * again. This does not finish the attempt.
+     * A duplicate row is still acknowledged. The strap offers a token it has
+     * not moved past, and the rows are already safe to reclaim. A previous
+     * [PersistedChunk.ackedAt] is not a reason to skip: older builds set that
+     * time when the radio accepted the bytes, and a stored-but-unacked chunk
+     * is sent again until it is acknowledged. Resends of this token on this
+     * attempt never reach here.
+     *
+     * Result 0, no type-36 result, and a refused write do not mark the row and
+     * do not send a second command 23 on this attempt. The next sync may try
+     * once more. That is the bound: one write per token per attempt.
      */
-    private fun writeOneShot(session: Long, token: ByteArray): Boolean {
-        if (!HistoryAckCommand.sendable(token)) return false
+    private fun acknowledge(session: Long, token: ByteArray, samples: Int) {
+        if (!active) return
+        if (!historyAckEnabled()) {
+            skipAck("History acknowledgement is off. Saved chunks were not acknowledged.")
+            return
+        }
+        val version = firmware()
+        if (!HistoryAckFirmware.allows(version)) {
+            skipAck("Hello firmware is not ${HistoryAckFirmware.ALLOWED}. Saved chunks were not acknowledged.")
+            return
+        }
+        if (!HistoryAckCommand.sendable(token)) {
+            skipAck("This token is not acknowledged. Nothing was sent.")
+            return
+        }
         val body = HistoryAckCommand.body(token)
         val seq = nextSequence()
-        val ackFrame = FrameCodec.encode(
+        val sequenceBusy = openAcks.containsKey(seq)
+        if (sequenceBusy || !tracker.open(connection, HistoryAckCommand.NUMBER, seq)) {
+            if (!sequenceBusy) tracker.abandon(connection, HistoryAckCommand.NUMBER, seq)
+            skipAck("The acknowledgement sequence was busy. Nothing was sent.")
+            return
+        }
+        val frame = FrameCodec.encode(
             headerWord = HeaderWord.COMMON_REQUEST,
             packetType = PacketType.COMMAND,
             sequence = seq,
             command = HistoryAckCommand.NUMBER,
             body = body,
         )
-        tracker.open(connection, HistoryAckCommand.NUMBER, seq)
-        if (!transmit(ackFrame)) {
-            tracker.abandon(connection, HistoryAckCommand.NUMBER, seq)
-            return false
+        val open = OpenAck(session, token.copyOf(), samples)
+        openAcks[seq] = open
+        if (!transmit(frame)) {
+            if (openAcks.remove(seq) != null) {
+                tracker.abandon(connection, HistoryAckCommand.NUMBER, seq)
+                ackRadioRefused += 1
+                lastAckKind = AckKind.RADIO_REFUSED
+                lastAckResult = null
+                log("history ack radio refused")
+            }
+            publish()
+            return
         }
+        ackSent += 1
         trace += SyncTrace.Ack(token.copyOf(), body.copyOf())
-        try {
-            store.markAcknowledged(session, token, phone.now().unixSeconds)
-        } catch (error: Exception) {
-            // The bytes were already handed to the link. Do not write them again.
+        if (openAcks[seq] === open) {
+            lastAckKind = AckKind.HANDED_OFF
+            lastAckResult = null
         }
-        return true
+        log("history ack handed to the radio")
+        publish()
+    }
+
+    private fun observeAck(match: ReplyMatch.Matched) {
+        val open = openAcks[match.originSequence] ?: return
+        if (match.pending) {
+            if (!open.pending) {
+                open.pending = true
+                ackPending += 1
+            }
+            lastAckKind = AckKind.PENDING
+            lastAckResult = match.result
+            publish()
+            return
+        }
+        openAcks.remove(match.originSequence)
+        if (open.pending) ackPending -= 1
+        lastAckKind = AckKind.RESULT
+        lastAckResult = match.result
+        log("history ack result ${match.result}")
+        if (match.result == CommandResult.SUCCESS) {
+            try {
+                store.markAcknowledged(open.sessionId, open.token, phone.now().unixSeconds)
+            } catch (error: Exception) {
+                // The strap already returned result 1. Do not write the command again.
+            }
+            ackResult1 += 1
+            ackEligibleRecords += open.samples
+        } else if (match.result == CommandResult.FAILURE) {
+            ackResult0 += 1
+        } else {
+            ackNote = "The strap result was ${match.result}. It is not treated as success and was not retried."
+        }
+        publish()
+    }
+
+    private fun skipAck(reason: String) {
+        ackSkipped += 1
+        lastAckKind = AckKind.SKIPPED
+        ackNote = reason
+        log("history ack skipped")
+        publish()
+    }
+
+    private fun closeOpenAcks() {
+        if (openAcks.isEmpty()) return
+        for (open in openAcks.values) {
+            if (open.pending) ackPending -= 1
+        }
+        ackUnanswered += openAcks.size
+        openAcks.clear()
+        lastAckKind = AckKind.NO_RESPONSE
+        lastAckResult = null
     }
 
     private fun send(command: Int, body: ByteArray): Boolean {
@@ -569,6 +640,7 @@ class HistorySyncEngine(
     private fun finish(outcome: SessionOutcome) {
         if (!active) return
         active = false
+        closeOpenAcks()
         phase = SyncPhase.DONE
         this.outcome = outcome
         val session = sessionId
@@ -597,6 +669,13 @@ class HistorySyncEngine(
         sequence = (sequence + 1) and 0xFF
         return current
     }
+
+    private class OpenAck(
+        val sessionId: Long,
+        val token: ByteArray,
+        val samples: Int,
+        var pending: Boolean = false,
+    )
 
     private companion object {
         val NEXT_CONNECTION = AtomicLong(0)

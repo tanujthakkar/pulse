@@ -57,10 +57,11 @@ interface SyncStore {
     )
 
     /**
-     * Records that an acknowledgement for [token] was handed to the link.
+     * Records that the strap returned result 1 for [token].
      *
      * The token is the original 8 bytes. This does not send the acknowledgement.
-     * A missing chunk leaves the store unchanged.
+     * A missing chunk leaves the store unchanged. A radio handoff, a result of
+     * 0, a pending result, and a missing result do not call this.
      */
     fun markAcknowledged(
         sessionId: Long,
