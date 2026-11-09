@@ -34,7 +34,7 @@ fun DayScreen(
     ) {
         Text("Days", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Approximate formulas from stored layout-18 seconds. Not WHOOP scores.",
+            "Approximate formulas from strap seconds and Edge import seconds. Strap wins on overlap. Not WHOOP scores.",
             modifier = Modifier.padding(top = 8.dp),
         )
         Button(

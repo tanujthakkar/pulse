@@ -15,7 +15,10 @@ import kotlin.math.sqrt
  * [heartRateBpm] is already limited to the display window. [rrMillis] are
  * positive intervals only. [activityClass] is 0 still, 1 walk, 2 run, or null.
  * [bandMotion] is 0 WAKE, 1 STILL, 2 SLEEP, 3 UP. [stepCounter] is the
- * cumulative hardware counter, not a daily total.
+ * cumulative hardware counter, not a daily total. [source] is [SOURCE_STRAP]
+ * or [SOURCE_EDGE]. [stepsKnown] is false when that second has no counter.
+ * [edgeWindowSleep] marks a second labeled from an Edge onset/offset because
+ * band motion was absent. It is not a band-motion SLEEP bit.
  */
 data class SecondRecord(
     val unixSeconds: Long,
@@ -25,7 +28,13 @@ data class SecondRecord(
     val activityClass: Int?,
     val bandMotion: Int?,
     val stepCounter: Int,
+    val source: String = SOURCE_STRAP,
+    val stepsKnown: Boolean = true,
+    val edgeWindowSleep: Boolean = false,
 )
+
+const val SOURCE_STRAP: String = "strap"
+const val SOURCE_EDGE: String = "edge_import"
 
 /** Published-algorithm constants. The formulas are approximate where noted. */
 object DayRules {
@@ -53,6 +62,33 @@ data class SleepEpisode(
     val sleepSeconds: Int,
     val spanSeconds: Long,
     val endDate: LocalDate,
+    val edgeProvided: Boolean = false,
+)
+
+/**
+ * One Edge sleep candidate window.
+ *
+ * [startUnix] is inclusive and [endUnix] is exclusive. The metrics engine
+ * uses it only for Edge seconds that have no band-motion value.
+ */
+data class EdgeSleepWindow(
+    val dayId: String,
+    val algoVersion: Long,
+    val startUnix: Long,
+    val endUnix: Long,
+)
+
+/**
+ * One Edge day_result row shown beside Pulse metrics.
+ *
+ * These numbers are not inputs to Pulse recovery or strain.
+ */
+data class EdgeDayNote(
+    val dayId: String,
+    val algoVersion: Long,
+    val restingHr: Double?,
+    val rmssd: Double?,
+    val readiness: Double?,
 )
 
 data class Rhythm(
@@ -90,9 +126,18 @@ data class DayResult(
     val runSeconds: Int,
     val otherActivitySeconds: Int,
     val stepIncrease: Long,
+    val edgeStepIncrease: Long,
     val stepWraps: Int,
     val stepResets: Int,
     val stepsAcrossLongGaps: Long,
+    val strapSeconds: Int,
+    val edgeSeconds: Int,
+    val strapHeartSeconds: Int,
+    val edgeHeartSeconds: Int,
+    val strapAcceptedRrSeconds: Int,
+    val edgeAcceptedRrSeconds: Int,
+    val sleepDetection: String,
+    val edgeNote: EdgeDayNote?,
 )
 
 data class Recovery(
@@ -125,22 +170,30 @@ data class DayBook(
 /**
  * Per-day sleep, recovery, strain, and activity from stored seconds.
  *
- * Nothing here is a WHOOP score. Sleep is the strap's band-motion SLEEP
- * label, not light, deep, or REM. Recovery and strain are labeled formulas
- * so a capture can be checked by hand.
+ * Nothing here is a WHOOP score. Sleep is band-motion SLEEP, not light,
+ * deep, or REM. An Edge onset/offset is used only where band motion is
+ * absent, and it is labeled Edge-provided. Recovery and strain are Pulse
+ * formulas. Edge day_result values are displayed and are not those formulas.
  */
-fun computeDays(records: List<SecondRecord>, zone: ZoneId): DayBook {
-    val samples = dedupe(records)
-    if (samples.isEmpty()) {
-        return DayBook(zone.id, emptyList(), "No layout-18 seconds are stored.")
+fun computeDays(
+    records: List<SecondRecord>,
+    zone: ZoneId,
+    edgeWindows: List<EdgeSleepWindow> = emptyList(),
+    edgeScores: List<EdgeDayNote> = emptyList(),
+): DayBook {
+    val samples = labelEdgeWindows(dedupe(records), edgeWindows)
+    val scoreDates = edgeScores.mapNotNull { scoreDate(it.dayId) }
+    if (samples.isEmpty() && scoreDates.isEmpty()) {
+        return DayBook(zone.id, emptyList(), "No layout-18 or Edge one-second rows are stored.")
     }
     val episodes = sleepEpisodes(samples, zone)
     val steps = stepDeltas(samples, zone)
     val dates = LinkedHashSet<LocalDate>()
     for (sample in samples) dates += localDate(sample.unixSeconds, zone)
     for (episode in episodes) dates += episode.endDate
+    dates.addAll(scoreDates)
     val days = dates.map { date ->
-        dayResult(date, zone, samples, episodes, steps)
+        dayResult(date, zone, samples, episodes, steps, edgeScores)
     }.sortedByDescending { it.date }
     return DayBook(zone.id, days, null)
 }
@@ -162,10 +215,17 @@ fun dayBookText(book: DayBook): String = buildString {
 }
 
 private const val METHOD: String =
-    "Approximate day metrics from stored layout-18 seconds. Not WHOOP scores.\n" +
-        "Sleep uses band-motion SLEEP (frame byte 81 bits 4-5). It is not light, deep, or REM. " +
+    "Approximate day metrics from stored layout-18 seconds and Edge import seconds. Not WHOOP scores.\n" +
+        "A strap second wins over an Edge second at the same Unix time. " +
+        "Edge one-second rows fill only the seconds the strap does not have.\n" +
+        "Sleep uses band-motion SLEEP when that value is stored (strap frame byte 81 bits 4-5, " +
+        "or Edge band_sleep_state 0 WAKE, 1 STILL, 2 SLEEP, 3 UP). It is not light, deep, or REM. " +
+        "Where Edge seconds have no band-motion value, an Edge onset/offset labels those seconds. " +
+        "That window is Edge-provided. " +
         "SLEEP seconds separated by under 5 minutes stay one episode. " +
         "An episode under 20 minutes is short and is not the main sleep.\n" +
+        "Edge day_result resting HR, RMSSD, and readiness are printed as Edge. " +
+        "They are not Pulse recovery or strain.\n" +
         "RMSSD is the Task Force (1996) root mean square of successive differences. " +
         "Intervals outside 300-2000 ms are dropped. A successive change above 20% of the previous " +
         "interval is dropped. Those two filters are approximate.\n" +
@@ -187,6 +247,32 @@ private fun dayText(day: DayResult, zone: String): String = buildString {
     append("Day ")
     append(day.date)
     append('\n')
+    append("Source: ")
+    append(sourceLabel(day.strapSeconds, day.edgeSeconds))
+    append(". Strap seconds ")
+    append(day.strapSeconds)
+    append(" (HR ")
+    append(day.strapHeartSeconds)
+    append(" / ")
+    append(day.strapSeconds)
+    append(", R-R in 300-2000 ms ")
+    append(day.strapAcceptedRrSeconds)
+    append(" / ")
+    append(day.strapSeconds)
+    append("). Edge import seconds ")
+    append(day.edgeSeconds)
+    append(" (HR ")
+    append(day.edgeHeartSeconds)
+    append(" / ")
+    append(day.edgeSeconds)
+    append(", R-R in 300-2000 ms ")
+    append(day.edgeAcceptedRrSeconds)
+    append(" / ")
+    append(day.edgeSeconds)
+    append(").\n")
+    append("Sleep detection: ")
+    append(day.sleepDetection)
+    append(".\n")
     append("Stored ")
     append(day.storedSeconds)
     append(" of ")
@@ -234,7 +320,7 @@ private fun dayText(day: DayResult, zone: String): String = buildString {
     if (day.main == null) {
         append("Main sleep: none ending this day.\n")
     } else {
-        append("Main sleep: ")
+        append(if (day.main.edgeProvided) "Main sleep (Edge-provided onset/offset): " else "Main sleep: ")
         append(episodeText(day.main, zone))
         append('\n')
     }
@@ -328,8 +414,22 @@ private fun dayText(day: DayResult, zone: String): String = buildString {
     append(" s, other ")
     append(day.otherActivitySeconds)
     append(" s.\n")
+    val note = day.edgeNote
+    if (note != null) {
+        append("Edge day_result (not used for Pulse recovery or strain): algo ")
+        append(note.algoVersion)
+        append(", resting HR ")
+        append(num(note.restingHr))
+        append(", RMSSD ")
+        append(num(note.rmssd))
+        append(", readiness ")
+        append(num(note.readiness))
+        append(".\n")
+    }
     append("Step-counter increase ")
     append(day.stepIncrease)
+    append(". Edge step_count increase ")
+    append(day.edgeStepIncrease)
     append(". Wraps ")
     append(day.stepWraps)
     append(". Resets ")
@@ -340,8 +440,9 @@ private fun dayText(day: DayResult, zone: String): String = buildString {
 }
 
 private fun episodeText(episode: SleepEpisode, zone: String): String {
+    val kind = if (episode.edgeProvided) " Edge-provided onset/offset." else ""
     return clock(episode.startUnix, zone) + " to " + clock(episode.endUnix, zone) +
-        ", " + episode.sleepSeconds + " SLEEP seconds, span " + episode.spanSeconds + " s"
+        ", " + episode.sleepSeconds + " SLEEP seconds, span " + episode.spanSeconds + " s." + kind
 }
 
 internal fun banisterSecond(heartRate: Int, resting: Int, maxHr: Int): Double {
@@ -357,6 +458,7 @@ private fun dayResult(
     samples: List<SecondRecord>,
     episodes: List<SleepEpisode>,
     steps: List<StepDelta>,
+    edgeScores: List<EdgeDayNote>,
 ): DayResult {
     val start = date.atStartOfDay(zone).toEpochSecond()
     val end = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
@@ -401,7 +503,7 @@ private fun dayResult(
         missingInsideSpan = span?.third ?: 0,
         gapsAtLeastOneMinute = span?.fourth ?: 0,
         largestGapSeconds = span?.fifth ?: 0,
-        sleepSeconds = mine.count { it.bandMotion == DayRules.SLEEP },
+        sleepSeconds = mine.count { it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep },
         shortEpisodes = short.size,
         shortSleepSeconds = short.sumOf { it.sleepSeconds },
         episodes = qualifying,
@@ -413,11 +515,41 @@ private fun dayResult(
         walkSeconds = walk,
         runSeconds = run,
         otherActivitySeconds = other,
-        stepIncrease = daySteps.sumOf { it.increase },
+        stepIncrease = daySteps.filter { it.source == SOURCE_STRAP }.sumOf { it.increase },
+        edgeStepIncrease = daySteps.filter { it.source == SOURCE_EDGE }.sumOf { it.increase },
         stepWraps = daySteps.count { it.wrap },
         stepResets = daySteps.count { it.reset },
         stepsAcrossLongGaps = daySteps.filter { it.longGap }.sumOf { it.increase },
+        strapSeconds = mine.count { it.source == SOURCE_STRAP },
+        edgeSeconds = mine.count { it.source == SOURCE_EDGE },
+        strapHeartSeconds = mine.count { it.source == SOURCE_STRAP && it.heartRateBpm != null },
+        edgeHeartSeconds = mine.count { it.source == SOURCE_EDGE && it.heartRateBpm != null },
+        strapAcceptedRrSeconds = mine.count { sample ->
+            sample.source == SOURCE_STRAP && sample.rrMillis.any { it in DayRules.RR_MIN_MS..DayRules.RR_MAX_MS }
+        },
+        edgeAcceptedRrSeconds = mine.count { sample ->
+            sample.source == SOURCE_EDGE && sample.rrMillis.any { it in DayRules.RR_MIN_MS..DayRules.RR_MAX_MS }
+        },
+        sleepDetection = sleepDetection(mine),
+        edgeNote = edgeScores.filter { it.dayId == date.toString() }.maxByOrNull { it.algoVersion },
     )
+}
+
+private fun sleepDetection(samples: List<SecondRecord>): String {
+    val band = samples.any { it.bandMotion == DayRules.SLEEP }
+    val window = samples.any { it.edgeWindowSleep }
+    return when {
+        band && window -> "band-motion and Edge onset/offset"
+        window -> "Edge onset/offset"
+        band -> "band-motion"
+        else -> "none"
+    }
+}
+
+private fun sourceLabel(strapSeconds: Int, edgeSeconds: Int): String = when {
+    strapSeconds > 0 && edgeSeconds > 0 -> "mixed"
+    edgeSeconds > 0 -> "Edge import"
+    else -> "strap"
 }
 
 private fun spanOf(samples: List<SecondRecord>): Span? {
@@ -529,7 +661,8 @@ private fun scoreStrain(samples: List<SecondRecord>, resting: Int?): Strain {
 
 private fun measure(samples: List<SecondRecord>, episode: SleepEpisode): Rhythm {
     val inside = samples.filter {
-        it.unixSeconds in episode.startUnix..episode.endUnix && it.bandMotion == DayRules.SLEEP
+        it.unixSeconds in episode.startUnix..episode.endUnix &&
+            (it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep)
     }
     val accepted = ArrayList<Int>()
     var intervals = 0
@@ -564,7 +697,7 @@ private fun measure(samples: List<SecondRecord>, episode: SleepEpisode): Rhythm 
 }
 
 private fun sleepEpisodes(samples: List<SecondRecord>, zone: ZoneId): List<SleepEpisode> {
-    val sleep = samples.filter { it.bandMotion == DayRules.SLEEP }
+    val sleep = samples.filter { it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep }
     if (sleep.isEmpty()) return emptyList()
     val runs = ArrayList<MutableList<SecondRecord>>()
     var current = mutableListOf(sleep.first())
@@ -587,12 +720,14 @@ private fun sleepEpisodes(samples: List<SecondRecord>, zone: ZoneId): List<Sleep
             sleepSeconds = run.size,
             spanSeconds = end - start + 1,
             endDate = localDate(end, zone),
+            edgeProvided = run.all { it.edgeWindowSleep && it.bandMotion != DayRules.SLEEP },
         )
     }
 }
 
 private data class StepDelta(
     val date: LocalDate,
+    val source: String,
     val increase: Long,
     val wrap: Boolean,
     val reset: Boolean,
@@ -605,6 +740,7 @@ private fun stepDeltas(samples: List<SecondRecord>, zone: ZoneId): List<StepDelt
     for (index in 1 until samples.size) {
         val previous = samples[index - 1]
         val current = samples[index]
+        if (!previous.stepsKnown || !current.stepsKnown || previous.source != current.source) continue
         val gap = current.unixSeconds - previous.unixSeconds
         val raw = current.stepCounter - previous.stepCounter
         val wrapped = raw < 0 &&
@@ -618,6 +754,7 @@ private fun stepDeltas(samples: List<SecondRecord>, zone: ZoneId): List<StepDelt
         }
         deltas += StepDelta(
             date = localDate(current.unixSeconds, zone),
+            source = current.source,
             increase = increase,
             wrap = wrapped,
             reset = raw < 0 && !wrapped,
@@ -625,6 +762,40 @@ private fun stepDeltas(samples: List<SecondRecord>, zone: ZoneId): List<StepDelt
         )
     }
     return deltas
+}
+
+internal fun labelEdgeWindows(
+    samples: List<SecondRecord>,
+    windows: List<EdgeSleepWindow>,
+): List<SecondRecord> {
+    if (samples.isEmpty() || windows.isEmpty()) return samples
+    val chosen = windows
+        .filter { it.endUnix > it.startUnix }
+        .groupBy { it.dayId }
+        .values
+        .map { rows -> rows.maxBy { it.algoVersion } }
+    val relabel = HashSet<Int>()
+    for (window in chosen) {
+        val inside = samples.indices.filter { index ->
+            val sample = samples[index]
+            sample.source == SOURCE_EDGE &&
+                sample.unixSeconds >= window.startUnix &&
+                sample.unixSeconds < window.endUnix
+        }
+        if (inside.isEmpty()) continue
+        if (inside.any { samples[it].bandMotion != null }) continue
+        relabel.addAll(inside)
+    }
+    if (relabel.isEmpty()) return samples
+    return samples.mapIndexed { index, sample ->
+        if (index in relabel) sample.copy(edgeWindowSleep = true) else sample
+    }
+}
+
+private fun scoreDate(dayId: String): LocalDate? = try {
+    LocalDate.parse(dayId)
+} catch (_: Exception) {
+    null
 }
 
 private fun dedupe(records: List<SecondRecord>): List<SecondRecord> {

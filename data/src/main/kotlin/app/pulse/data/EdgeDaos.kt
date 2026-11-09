@@ -154,6 +154,29 @@ interface EdgeImportDao {
             "ORDER BY ts_ms LIMIT 1",
     )
     fun edgeHeartRate(startMs: Long, endMs: Long): EdgeHeartRateHit?
+
+    @Query(
+        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state " +
+            "FROM edge_onehz WHERE source = :source ORDER BY ts_ms ASC",
+    )
+    fun metricOneHz(source: String): List<EdgeOneHzMetricRow>
+
+    @Query(
+        "SELECT ts_ms, rr_ms FROM edge_rr WHERE source = :source " +
+            "ORDER BY ts_ms ASC, beat_index ASC",
+    )
+    fun metricRr(source: String): List<EdgeRrMetricRow>
+
+    @Query(
+        "SELECT day_id, algo_version, onset_ts, offset_ts FROM edge_sleep " +
+            "WHERE source = :source AND onset_ts IS NOT NULL AND offset_ts IS NOT NULL",
+    )
+    fun metricSleep(source: String): List<EdgeSleepMetricRow>
+
+    @Query(
+        "SELECT day_id, algo_version, rhr, rmssd, readiness FROM edge_day_score WHERE source = :source",
+    )
+    fun metricScores(source: String): List<EdgeScoreMetricRow>
 }
 
 data class StrapHeartRate(

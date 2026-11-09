@@ -2,6 +2,10 @@ package app.pulse.data
 
 import androidx.room.ColumnInfo
 import app.pulse.metrics.DayBook
+import app.pulse.metrics.EdgeDayNote
+import app.pulse.metrics.EdgeSleepWindow
+import app.pulse.metrics.SOURCE_EDGE
+import app.pulse.metrics.SOURCE_STRAP
 import app.pulse.metrics.SecondRecord
 import app.pulse.metrics.computeDays
 import app.pulse.metrics.dayBookText
@@ -44,17 +48,125 @@ class RoomDayMetrics(
     override fun report(zone: ZoneId): String {
         return try {
             val device = devices.latest()
-            val records = if (device == null) {
-                null
+            val strap = if (device == null) {
+                emptyList()
             } else {
                 database.samples().metricRows(device.address).map { it.toSecondRecord() }
             }
-            metricsText(zone, records)
+            val imported = database.edgeImport()
+            val inputs = StoredDayInputs(
+                oneHz = imported.metricOneHz(EDGE_IMPORT_SOURCE),
+                rr = imported.metricRr(EDGE_IMPORT_SOURCE),
+                sleep = imported.metricSleep(EDGE_IMPORT_SOURCE),
+                scores = imported.metricScores(EDGE_IMPORT_SOURCE),
+            )
+            if (device == null && inputs.oneHz.isEmpty()) {
+                return metricsText(zone, null)
+            }
+            val assembly = assembleDays(strap, inputs)
+            dayBookText(computeDays(assembly.records, zone, assembly.windows, assembly.notes))
         } catch (_: Exception) {
             "Day metrics could not be read.\n"
         }
     }
 }
+
+internal data class StoredDayInputs(
+    val oneHz: List<EdgeOneHzMetricRow> = emptyList(),
+    val rr: List<EdgeRrMetricRow> = emptyList(),
+    val sleep: List<EdgeSleepMetricRow> = emptyList(),
+    val scores: List<EdgeScoreMetricRow> = emptyList(),
+)
+
+internal data class DayAssembly(
+    val records: List<SecondRecord>,
+    val windows: List<EdgeSleepWindow>,
+    val notes: List<EdgeDayNote>,
+)
+
+/**
+ * Strap seconds block Edge seconds at the same Unix time.
+ *
+ * That is the same preference as [PulseDatabase.heartRateAt]. Edge R-R
+ * intervals attach only to an Edge second that was kept.
+ */
+internal fun assembleDays(strap: List<SecondRecord>, inputs: StoredDayInputs): DayAssembly {
+    val blocked = strap.map { it.unixSeconds }.toHashSet()
+    val edge = edgeSeconds(inputs.oneHz, inputs.rr).filter { it.unixSeconds !in blocked }
+    return DayAssembly(
+        records = strap + edge,
+        windows = sleepWindows(inputs.sleep),
+        notes = inputs.scores.map {
+            EdgeDayNote(
+                dayId = it.dayId,
+                algoVersion = it.algoVersion,
+                restingHr = it.rhr,
+                rmssd = it.rmssd,
+                readiness = it.readiness,
+            )
+        },
+    )
+}
+
+internal fun edgeSeconds(
+    oneHz: List<EdgeOneHzMetricRow>,
+    rr: List<EdgeRrMetricRow>,
+): List<SecondRecord> {
+    val beats = HashMap<Long, MutableList<Int>>()
+    for (row in rr) {
+        if (row.rrMs <= 0L || row.rrMs > Int.MAX_VALUE) continue
+        val second = Math.floorDiv(row.tsMs, 1000L)
+        beats.getOrPut(second) { ArrayList() }.add(row.rrMs.toInt())
+    }
+    val chosen = LinkedHashMap<Long, EdgeOneHzMetricRow>()
+    for (row in oneHz.sortedBy { it.tsMs }) {
+        val second = Math.floorDiv(row.tsMs, 1000L)
+        if (second !in chosen) chosen[second] = row
+    }
+    return chosen.map { (second, row) ->
+        val stepsKnown = row.stepCount != null && row.stepCount in 0L..Int.MAX_VALUE.toLong()
+        SecondRecord(
+            unixSeconds = second,
+            recordIndex = 0,
+            heartRateBpm = edgeHeartBpm(row.hr, row.hrValid),
+            rrMillis = beats[second].orEmpty(),
+            activityClass = edgeActivity(row.activityClass),
+            bandMotion = edgeBandMotion(row.bandSleepState),
+            stepCounter = if (stepsKnown) row.stepCount!!.toInt() else 0,
+            source = SOURCE_EDGE,
+            stepsKnown = stepsKnown,
+        )
+    }
+}
+
+internal fun sleepWindows(rows: List<EdgeSleepMetricRow>): List<EdgeSleepWindow> {
+    return rows
+        .mapNotNull { row ->
+            val onset = row.onsetTs ?: return@mapNotNull null
+            val offset = row.offsetTs ?: return@mapNotNull null
+            val start = epochSeconds(onset)
+            val end = epochSeconds(offset)
+            if (end <= start) return@mapNotNull null
+            EdgeSleepWindow(row.dayId, row.algoVersion, start, end)
+        }
+        .groupBy { it.dayId }
+        .values
+        .map { windows -> windows.maxBy { it.algoVersion } }
+}
+
+/** Epoch milliseconds are stored by some payloads; values below 1e10 are seconds. */
+internal fun epochSeconds(value: Long): Long = if (value >= 10_000_000_000L) value / 1000 else value
+
+/** Layout-18 display window is 25..230. A zero hr_valid drops the sample. */
+internal fun edgeHeartBpm(hr: Long?, hrValid: Long?): Int? {
+    if (hrValid == 0L || hr == null || hr !in 25L..230L) return null
+    return hr.toInt()
+}
+
+/** Edge band_sleep_state uses the same 0..3 labels as strap band motion. */
+internal fun edgeBandMotion(state: Long?): Int? = if (state != null && state in 0L..3L) state.toInt() else null
+
+internal fun edgeActivity(value: Long?): Int? = if (value != null && value in 0L..2L) value.toInt() else null
 
 internal fun metricsText(zone: ZoneId, records: List<SecondRecord>?): String {
     if (records == null) {
@@ -84,5 +196,36 @@ internal fun R18MetricRow.toSecondRecord(): SecondRecord {
         activityClass = activityClass,
         bandMotion = restState,
         stepCounter = stepCounter,
+        source = SOURCE_STRAP,
+        stepsKnown = true,
     )
 }
+
+data class EdgeOneHzMetricRow(
+    @ColumnInfo(name = "ts_ms") val tsMs: Long,
+    val hr: Long?,
+    @ColumnInfo(name = "hr_valid") val hrValid: Long?,
+    @ColumnInfo(name = "activity_class") val activityClass: Long?,
+    @ColumnInfo(name = "step_count") val stepCount: Long?,
+    @ColumnInfo(name = "band_sleep_state") val bandSleepState: Long?,
+)
+
+data class EdgeRrMetricRow(
+    @ColumnInfo(name = "ts_ms") val tsMs: Long,
+    @ColumnInfo(name = "rr_ms") val rrMs: Long,
+)
+
+data class EdgeSleepMetricRow(
+    @ColumnInfo(name = "day_id") val dayId: String,
+    @ColumnInfo(name = "algo_version") val algoVersion: Long,
+    @ColumnInfo(name = "onset_ts") val onsetTs: Long?,
+    @ColumnInfo(name = "offset_ts") val offsetTs: Long?,
+)
+
+data class EdgeScoreMetricRow(
+    @ColumnInfo(name = "day_id") val dayId: String,
+    @ColumnInfo(name = "algo_version") val algoVersion: Long,
+    val rhr: Double?,
+    val rmssd: Double?,
+    val readiness: Double?,
+)

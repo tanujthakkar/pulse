@@ -16,7 +16,7 @@ class MetricsTest {
         assertTrue(Metrics.IMPLEMENTED)
         val book = computeDays(emptyList(), ZoneOffset.UTC)
         assertTrue(dayBookText(book).contains("Not WHOOP scores"))
-        assertTrue(dayBookText(book).contains("No layout-18 seconds"))
+        assertTrue(dayBookText(book).contains("No layout-18 or Edge one-second rows"))
     }
 
     @Test
@@ -192,13 +192,99 @@ class MetricsTest {
         assertEquals(1, day.stepResets)
     }
 
+    @Test
+    fun anEdgeNightWithBandMotionProducesSleepRmssdAndRestingHr() {
+        val start = LocalDate.of(2026, 7, 1).atStartOfDay(ZoneOffset.UTC).toEpochSecond() + 3600
+        val records = sleepRun(start, 1200, source = SOURCE_EDGE) { index ->
+            if (index % 2 == 0) 1000 else 1100
+        }
+        val day = computeDays(records, ZoneOffset.UTC).days.single()
+        assertEquals("Edge import", sourceName(day))
+        assertEquals("band-motion", day.sleepDetection)
+        assertEquals(false, day.main!!.edgeProvided)
+        assertEquals(100.0, day.rhythm!!.rmssdMs!!, 0.001)
+        assertEquals(50, day.rhythm.restingHr)
+        assertEquals(1200, day.edgeSeconds)
+        assertEquals(0, day.strapSeconds)
+        val text = dayBookText(computeDays(records, ZoneOffset.UTC))
+        assertTrue(text.contains("Source: Edge import"))
+        assertTrue(text.contains("strap second wins"))
+    }
+
+    @Test
+    fun anEdgeOnsetLabelsSleepWhenBandMotionIsAbsent() {
+        val start = LocalDate.of(2026, 7, 2).atStartOfDay(ZoneOffset.UTC).toEpochSecond() + 3600
+        val records = sleepRun(start, 1200, source = SOURCE_EDGE, motion = null) { index ->
+            if (index % 2 == 0) 1000 else 900
+        }
+        val window = EdgeSleepWindow("2026-07-02", 2, start, start + 1200)
+        val day = computeDays(records, ZoneOffset.UTC, listOf(window)).days.single()
+        assertEquals(true, day.main!!.edgeProvided)
+        assertEquals("Edge onset/offset", day.sleepDetection)
+        assertEquals(100.0, day.rhythm!!.rmssdMs!!, 0.001)
+        assertEquals(50, day.rhythm.restingHr)
+        val text = dayBookText(computeDays(records, ZoneOffset.UTC, listOf(window)))
+        assertTrue(text.contains("Main sleep (Edge-provided onset/offset)"))
+    }
+
+    @Test
+    fun bandMotionWinsOverAnEdgeWindow() {
+        val start = LocalDate.of(2026, 7, 3).atStartOfDay(ZoneOffset.UTC).toEpochSecond() + 3600
+        val records = sleepRun(start, 1200, source = SOURCE_EDGE)
+        val window = EdgeSleepWindow("ignored", 1, start, start + 1200)
+        val day = computeDays(records, ZoneOffset.UTC, listOf(window)).days.single()
+        assertEquals(false, day.main!!.edgeProvided)
+        assertEquals("band-motion", day.sleepDetection)
+    }
+
+    @Test
+    fun threeEarlierEdgeNightsUnlockRecoveryAndAnEdgeScoreStaysSeparate() {
+        val zone = ZoneOffset.UTC
+        val first = LocalDate.of(2026, 8, 1)
+        val records = (0..3).flatMap { offset ->
+            val start = first.plusDays(offset.toLong()).atStartOfDay(zone).toEpochSecond() + 3600
+            sleepRun(start, 1200, source = SOURCE_EDGE) { index ->
+                val other = if (offset == 3) 1200 else 1100
+                if (index % 2 == 0) 1000 else other
+            }
+        }
+        val lastDate = first.plusDays(3)
+        val note = EdgeDayNote(lastDate.toString(), 4, 40.0, 10.0, 80.0)
+        val book = computeDays(records, zone, edgeScores = listOf(note))
+        val last = book.days.first { it.date == lastDate }
+        assertEquals(3, last.recovery!!.baselineDays)
+        val expected = 50.0 + 40.0 * ln(2.0)
+        assertEquals(expected, last.recovery.score!!, 0.001)
+        assertEquals(80.0, last.edgeNote!!.readiness)
+        val text = dayBookText(book)
+        assertTrue(text.contains("Edge day_result (not used for Pulse recovery or strain)"))
+        assertTrue(text.contains("readiness 80.0000"))
+        assertTrue(text.contains("Recovery: ${"%.4f".format(java.util.Locale.US, expected)}"))
+    }
+
+    private fun sourceName(day: DayResult): String = when {
+        day.strapSeconds > 0 && day.edgeSeconds > 0 -> "mixed"
+        day.edgeSeconds > 0 -> "Edge import"
+        else -> "strap"
+    }
+
     private fun sleepRun(
         start: Long,
         seconds: Int,
         hr: Int = 50,
+        source: String = SOURCE_STRAP,
+        motion: Int? = DayRules.SLEEP,
         rr: (Int) -> Int = { 1000 },
     ): List<SecondRecord> = (0 until seconds).map { index ->
-        second(start + index, 1, hr = hr, rr = listOf(rr(index)), motion = DayRules.SLEEP, activity = 0)
+        second(
+            start + index,
+            1,
+            hr = hr,
+            rr = listOf(rr(index)),
+            motion = motion,
+            activity = 0,
+            source = source,
+        )
     }
 
     private fun second(
@@ -209,6 +295,7 @@ class MetricsTest {
         motion: Int? = 0,
         activity: Int? = null,
         steps: Int = 0,
+        source: String = SOURCE_STRAP,
     ): SecondRecord = SecondRecord(
         unixSeconds = unix,
         recordIndex = index,
@@ -217,5 +304,6 @@ class MetricsTest {
         activityClass = activity,
         bandMotion = motion,
         stepCounter = steps,
+        source = source,
     )
 }
