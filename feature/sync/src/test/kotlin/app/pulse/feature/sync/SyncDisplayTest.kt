@@ -1,12 +1,15 @@
 package app.pulse.feature.sync
 
+import app.pulse.sync.AckPhase
 import app.pulse.sync.HistoryLimits
+import app.pulse.sync.OneShotAck
 import app.pulse.sync.PhoneTime
 import app.pulse.sync.SessionOutcome
 import app.pulse.sync.SyncActivity
 import app.pulse.sync.SyncPhase
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,23 +29,64 @@ class SyncDisplayTest {
         assertFalse(ui.outcomeIsError)
         assertNull(ui.notice)
         assertTrue(ui.canSync)
-        assertEquals("History acknowledgement is off. Sync does not send it.", ui.ackWarning)
+        assertTrue(ui.ackWarning.contains("reclaim"))
+        assertTrue(ui.ackWarning.contains(OneShotAck.FIRMWARE))
+        assertEquals("History acknowledgement is off. Sync does not send it.", ui.ackStatus)
         assertNull(ui.ackPreview)
-        assertFalse(ui.canArm)
-        assertFalse(ui.canSend)
+        assertTrue(ui.canArm)
+        assertFalse(ui.canCancel)
     }
 
     @Test
-    fun anOfferedChunkCanBeArmedAndIsNotSentByThePreview() {
-        val waiting = syncUi(SyncActivity(ackSamples = 35))
-        assertTrue(waiting.ackWarning.contains("reclaim"))
-        assertEquals("Not armed. Saved chunk waiting. Layout-18 rows in that chunk: 35.", waiting.ackPreview)
-        assertTrue(waiting.canArm)
-        assertFalse(waiting.canSend)
-        val armed = syncUi(SyncActivity(ackSamples = 35, ackArmed = true))
-        assertEquals("Armed. Saved chunk waiting. Layout-18 rows in that chunk: 35.", armed.ackPreview)
+    fun armedConsentCanBeCancelledAndDoesNotOfferASendButton() {
+        val armed = syncUi(SyncActivity(ackPhase = AckPhase.ARMED))
+        assertTrue(armed.ackWarning.contains("reclaim"))
+        assertEquals("Armed for the next sync. Nothing has been sent.", armed.ackStatus)
         assertFalse(armed.canArm)
-        assertTrue(armed.canSend)
+        assertTrue(armed.canCancel)
+        assertTrue(armed.canSync)
+        val waiting = syncUi(
+            SyncActivity(ackPhase = AckPhase.WAITING, running = true, phase = SyncPhase.STREAM),
+        )
+        assertTrue(waiting.canCancel)
+        assertFalse(waiting.canSync)
+        assertTrue(waiting.ackStatus!!.contains("Nothing has been sent"))
+    }
+
+    @Test
+    fun handoffAndResultsAreNotDescribedAsRadioSuccess() {
+        val handed = syncUi(
+            SyncActivity(
+                phase = SyncPhase.STREAM,
+                running = true,
+                ackPhase = AckPhase.HANDED_OFF,
+                ackSamples = 35,
+            ),
+        )
+        assertEquals("Layout-18 rows in the saved chunk: 35.", handed.ackPreview)
+        assertTrue(handed.ackStatus!!.contains("passed to the radio"))
+        assertTrue(handed.ackStatus.contains("not a strap response"))
+        assertFalse(handed.ackStatus.contains("status 0"))
+        assertFalse(handed.canCancel)
+        val accepted = syncUi(SyncActivity(ackPhase = AckPhase.RESULT, ackResult = 1, ackSamples = 35))
+        assertTrue(accepted.ackStatus!!.contains("result was 1"))
+        assertTrue(accepted.ackStatus.contains("does not prove"))
+        val failed = syncUi(SyncActivity(ackPhase = AckPhase.RESULT, ackResult = 0))
+        assertTrue(failed.ackStatus!!.contains("was not updated"))
+        val pending = syncUi(SyncActivity(ackPhase = AckPhase.PENDING, ackResult = 2))
+        assertTrue(pending.ackStatus!!.contains("pending"))
+        assertTrue(pending.ackStatus.contains("not success"))
+        val none = syncUi(
+            SyncActivity(
+                phase = SyncPhase.DONE,
+                ackPhase = AckPhase.NO_RESPONSE,
+                outcome = SessionOutcome.WATCHDOG,
+            ),
+        )
+        assertTrue(none.ackStatus!!.contains("not a strap result"))
+        assertNotEquals(none.outcome, none.ackStatus)
+        val refused = syncUi(SyncActivity(ackPhase = AckPhase.RADIO_REFUSED))
+        assertTrue(refused.ackStatus!!.contains("will not be retried"))
     }
 
     @Test

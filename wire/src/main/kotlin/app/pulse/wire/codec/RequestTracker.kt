@@ -149,6 +149,11 @@ class RequestTracker {
     fun isOpen(connection: ConnectionId, command: Int, sequence: Int): Boolean =
         open.contains(Key(connection.value, command, sequence))
 
+    /** Drops one open request so a later frame cannot be treated as its result. */
+    fun abandon(connection: ConnectionId, command: Int, sequence: Int) {
+        open.remove(Key(connection.value, command, sequence))
+    }
+
     fun dropConnection(connection: ConnectionId) {
         open.removeIf { it.connection == connection.value }
     }

@@ -139,12 +139,41 @@ data class SyncSnapshot(
 )
 
 /**
+ * Where the in-memory one-shot acknowledgement consent is.
+ *
+ * This is not the sync watchdog and not the production gate. [OFF] is the
+ * default. [ARMED] is local consent for the next attempt. [WAITING] is that
+ * consent bound to the attempt that is running. [WRITING] is the single write
+ * in progress. [HANDED_OFF] means the link accepted the bytes, which is not a
+ * strap result. [RADIO_REFUSED] means that write was not accepted and will not
+ * be repeated. [PENDING] and [RESULT] are type-36 results. [NO_RESPONSE] means
+ * the attempt ended after a handoff without a final type-36 result.
+ * [REFUSED] means validation stopped the write.
+ */
+enum class AckPhase {
+    OFF,
+    ARMED,
+    WAITING,
+    WRITING,
+    HANDED_OFF,
+    RADIO_REFUSED,
+    PENDING,
+    RESULT,
+    NO_RESPONSE,
+    REFUSED,
+}
+
+/**
  * What the sync screen observes.
  *
  * [outcome] and [finishedAt] clear when a new attempt starts. A tap with no
  * strap linked leaves them in place. [chunks] counts tokens newly stored on
  * this attempt. [savedSamples] and [savedChunks] are local-storage counts.
  * [blocked] is set when Sync now is tapped with no strap linked.
+ *
+ * [ackPhase] is process memory. It is not restored from [PersistedChunk.ackedAt].
+ * [ackResult] is a type-36 result code when one was parsed. [ackNote] is a
+ * specific reason that overrides the phase sentence.
  */
 data class SyncActivity(
     val phase: SyncPhase = SyncPhase.IDLE,
@@ -162,9 +191,9 @@ data class SyncActivity(
     val outcome: SessionOutcome? = null,
     val finishedAt: PhoneTime? = null,
     val blocked: String? = null,
+    val ackPhase: AckPhase = AckPhase.OFF,
     val ackSamples: Int? = null,
-    val ackArmed: Boolean = false,
-    val ackSpent: Boolean = false,
+    val ackResult: Int? = null,
     val ackNote: String? = null,
 )
 

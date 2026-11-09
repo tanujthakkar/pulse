@@ -30,8 +30,9 @@ import kotlinx.coroutines.flow.asStateFlow
  * [activity] is the live session view the Sync screen renders: phase, chunk
  * and record counts, and the last outcome with its time. Production
  * acknowledgements stay on [app.pulse.wire.codec.HistoryAckGate], which the
- * driver leaves closed. A one-shot acknowledgement is a separate in-memory
- * consent and is cleared when this port reports the link dropped.
+ * driver leaves closed. A one-shot acknowledgement is separate in-memory
+ * consent for the next attempt. It is cleared when this port reports the
+ * link dropped, and it is not restored from storage.
  */
 @Singleton
 class HistorySyncHost @Inject constructor(
@@ -75,13 +76,11 @@ class HistorySyncHost @Inject constructor(
         driver.syncNow()
     }
 
-    /** Does not write. */
-    fun armOneShot(): Boolean = driver.armOneShot()
+    /** Does not write. [firmware] is the hello version captured for this arm. */
+    fun armOneShot(firmware: String?): Boolean = driver.armOneShot(firmware)
 
-    /** One command 23 when consent is armed, then off. */
-    fun sendOneShot(firmware: String?) {
-        driver.sendOneShot(firmware)
-    }
+    /** Drops consent before the write is claimed. Does not write. */
+    fun cancelOneShot(): Boolean = driver.cancelOneShot()
 
     /** Notifies [listener] now and after each driver change. The returned function removes it. */
     fun watch(listener: () -> Unit): () -> Unit {

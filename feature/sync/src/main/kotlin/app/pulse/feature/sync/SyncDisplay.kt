@@ -1,5 +1,6 @@
 package app.pulse.feature.sync
 
+import app.pulse.sync.AckPhase
 import app.pulse.sync.HistoryLimits
 import app.pulse.sync.OneShotAck
 import app.pulse.sync.PhoneTime
@@ -23,7 +24,7 @@ data class SyncUi(
     val ackPreview: String?,
     val ackStatus: String?,
     val canArm: Boolean,
-    val canSend: Boolean,
+    val canCancel: Boolean,
 )
 
 fun syncUi(activity: SyncActivity): SyncUi {
@@ -42,27 +43,53 @@ fun syncUi(activity: SyncActivity): SyncUi {
         time = if (activity.running) IDLE_MARK else formatSyncTime(activity.finishedAt),
         notice = activity.blocked,
         canSync = !activity.running,
-        ackWarning = ackWarning(activity),
+        ackWarning = ackWarning(),
         ackPreview = ackPreview(activity),
-        ackStatus = activity.ackNote,
-        canArm = activity.ackSamples != null && !activity.ackArmed && !activity.running,
-        canSend = activity.ackArmed && activity.ackSamples != null && !activity.running,
+        ackStatus = ackStatus(activity),
+        canArm = !activity.running &&
+            activity.ackPhase != AckPhase.ARMED &&
+            activity.ackPhase != AckPhase.WAITING &&
+            activity.ackPhase != AckPhase.WRITING,
+        canCancel = activity.ackPhase == AckPhase.ARMED || activity.ackPhase == AckPhase.WAITING,
     )
 }
 
-private fun ackWarning(activity: SyncActivity): String {
-    if (activity.ackSamples == null) {
-        return "History acknowledgement is off. Sync does not send it."
-    }
+private fun ackWarning(): String {
     return "A successful acknowledgement can let the strap reclaim that history. " +
-        "Arming does not send. Send is one command, then off, and only for hello firmware " +
-        "${OneShotAck.FIRMWARE}."
+        "Arm this before Sync now. One armed sync sends a single acknowledgement after that chunk is saved, " +
+        "while the strap is still waiting, and then turns off. Hello firmware must be ${OneShotAck.FIRMWARE}."
+}
+
+private fun ackStatus(activity: SyncActivity): String {
+    activity.ackNote?.let { return it }
+    return when (activity.ackPhase) {
+        AckPhase.OFF -> "History acknowledgement is off. Sync does not send it."
+        AckPhase.ARMED -> "Armed for the next sync. Nothing has been sent."
+        AckPhase.WAITING -> "Armed for this sync. Waiting for one saved chunk. Nothing has been sent."
+        AckPhase.WRITING -> "One acknowledgement is being written. It will not be written twice."
+        AckPhase.HANDED_OFF -> "The acknowledgement was passed to the radio. That is not a strap response."
+        AckPhase.RADIO_REFUSED -> "The radio did not take the acknowledgement. It will not be retried."
+        AckPhase.PENDING -> "The strap result is pending. That is not success."
+        AckPhase.RESULT -> resultSentence(activity.ackResult)
+        AckPhase.NO_RESPONSE ->
+            "No command response arrived before the attempt ended. Passing bytes to the radio is not a strap result."
+        AckPhase.REFUSED -> "Nothing was sent."
+    }
+}
+
+private fun resultSentence(result: Int?): String = when (result) {
+    0 -> "The strap result was 0. The boundary was not updated."
+    1 -> "The strap result was 1 at the response boundary. That can let the strap reclaim that history. " +
+        "It does not prove the reclaim finished."
+    2 -> "The strap result is pending. That is not success."
+    3 -> "The strap result was 3, unsupported."
+    null -> "A strap result was observed without a code. It is not treated as success."
+    else -> "The strap result was $result. It is not treated as success."
 }
 
 private fun ackPreview(activity: SyncActivity): String? {
     val samples = activity.ackSamples ?: return null
-    val state = if (activity.ackArmed) "Armed." else "Not armed."
-    return "$state Saved chunk waiting. Layout-18 rows in that chunk: $samples."
+    return "Layout-18 rows in the saved chunk: $samples."
 }
 
 /** End-token counts for this attempt. New means stored for the first time. */

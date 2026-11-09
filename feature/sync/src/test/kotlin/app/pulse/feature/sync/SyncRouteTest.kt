@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -18,6 +19,7 @@ import app.pulse.link.LinkClock
 import app.pulse.link.LinkPorts
 import app.pulse.link.StrapCommandPort
 import app.pulse.link.StrapLink
+import app.pulse.sync.AckPhase
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.PersistedChunk
 import app.pulse.sync.PhoneTime
@@ -61,10 +63,14 @@ class SyncRouteTest {
         compose.onNodeWithTag("sync_now").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("sync_busy").assertDoesNotExist()
         compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextEquals(
+            syncUi(SyncActivity()).ackWarning,
+        )
+        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextEquals(
             "History acknowledgement is off. Sync does not send it.",
         )
-        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_arm").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_cancel").assertDoesNotExist()
         assertEquals("0:0", viewModel.modulePins)
     }
 
@@ -143,19 +149,33 @@ class SyncRouteTest {
     @Test
     fun armingDoesNotSend() {
         var arms = 0
-        var sends = 0
         compose.setContent {
             SyncScreen(
-                ui = syncUi(SyncActivity(ackSamples = 35)),
+                ui = syncUi(SyncActivity()),
                 onSyncNow = {},
                 onArmAck = { arms += 1 },
-                onSendAck = { sends += 1 },
             )
         }
         compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
         compose.onNodeWithTag("sync_ack_arm").performScrollTo().performClick()
         assertEquals(1, arms)
-        assertEquals(0, sends)
+    }
+
+    @Test
+    fun cancelIsOfferedWhileArmedAndSendIsAbsent() {
+        var cancels = 0
+        compose.setContent {
+            SyncScreen(
+                ui = syncUi(SyncActivity(ackPhase = AckPhase.ARMED)),
+                onSyncNow = {},
+                onCancelAck = { cancels += 1 },
+            )
+        }
+        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextContains("reclaim", substring = true)
+        compose.onNodeWithTag("sync_ack_cancel").performScrollTo().performClick()
+        assertEquals(1, cancels)
     }
 }
 

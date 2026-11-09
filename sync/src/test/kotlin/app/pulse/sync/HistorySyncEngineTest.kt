@@ -516,6 +516,60 @@ class HistorySyncEngineTest {
     }
 
     @Test
+    fun aClaimedOneShotWritesOnceWhenTransmitReentersAndTheGateIsAlsoEnabled() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val other = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val written = mutableListOf<ByteArray>()
+        val outbox = ArrayDeque<ByteArray>()
+        var reentered = false
+        lateinit var engine: HistorySyncEngine
+        val strap = FakeStrap(script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        engine = engine(
+            store,
+            ManualMillis(),
+            written,
+            ackEnabled = { true },
+            onDurableChunk = { true },
+        ) { frame ->
+            val decoded = FrameCodec.decode(frame)
+            if (!reentered &&
+                decoded is DecodeResult.Ok &&
+                decoded.frame.command == HistoryAckCommand.NUMBER
+            ) {
+                reentered = true
+                engine.onNotification("reenter", metadata(HistoryMetadata.END, other))
+            }
+            outbox += frame
+            true
+        }
+        engine.start()
+        var steps = 0
+        while (engine.isActive && steps < 30_000) {
+            steps += 1
+            if (outbox.isNotEmpty()) {
+                val frame = outbox.removeFirst()
+                if (strap.connected) strap.accept(frame)
+                continue
+            }
+            val incoming = strap.poll()
+            if (incoming != null) {
+                engine.onNotification("notify", incoming)
+                continue
+            }
+            break
+        }
+        assertTrue(steps < 30_000)
+        assertTrue(reentered)
+        assertEquals(1, written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(1, engine.events.filterIsInstance<SyncTrace.Ack>().size)
+        assertEquals(2, store.chunks.size)
+        assertArrayEquals(token, strap.ackTokens.single())
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+    }
+
+    @Test
     fun phoneTicksFollowTheHundredthsRule() {
         assertEquals(PhoneTime(1_700_000_000L, 0), phoneTimeFromUnixMillis(1_700_000_000_000L))
         assertEquals(PhoneTime(1, 16_384), phoneTimeFromUnixMillis(1_500))
@@ -611,6 +665,7 @@ class HistorySyncEngineTest {
         written: MutableList<ByteArray>,
         ackEnabled: () -> Boolean,
         onProgress: (SyncSnapshot) -> Unit = {},
+        onDurableChunk: (DurableChunk) -> Boolean = { false },
         transmit: (ByteArray) -> Boolean = { true },
     ): HistorySyncEngine {
         return HistorySyncEngine(
@@ -624,6 +679,7 @@ class HistorySyncEngineTest {
             ackEnabled = ackEnabled,
             nowMs = { clock.value },
             onProgress = onProgress,
+            onDurableChunk = onDurableChunk,
         )
     }
 

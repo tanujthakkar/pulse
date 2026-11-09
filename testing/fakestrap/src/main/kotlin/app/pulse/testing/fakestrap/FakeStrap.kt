@@ -137,7 +137,9 @@ class FakeStrap(
         ) {
             acks += wire.tail.copyOfRange(1, 1 + HistoryAckCommand.TOKEN_BYTES)
         }
-        reply(HistoryAckCommand.NUMBER, wire.sequence, CommandResult.SUCCESS, ByteArray(0))
+        val result = script.ackResult ?: return
+        reply(HistoryAckCommand.NUMBER, wire.sequence, result, ByteArray(0))
+        if (result != CommandResult.SUCCESS) return
         if (script.chunks.getOrNull(chunkIndex) == null) return
         // One acknowledgement advances the script. Repeated end frames are
         // resends of the same token and do not each require an acknowledgement.
@@ -208,6 +210,7 @@ class StrapScript(
     val stream: StreamKind = StreamKind.CHUNKS,
     val floodCount: Int = 2_000,
     val completeAfterChunks: Boolean = true,
+    val ackResult: Int? = CommandResult.SUCCESS,
 )
 
 class ScriptChunk(

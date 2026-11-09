@@ -23,7 +23,7 @@ fun SyncScreen(
     modifier: Modifier = Modifier,
     title: String = "Sync",
     onArmAck: () -> Unit = {},
-    onSendAck: () -> Unit = {},
+    onCancelAck: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -155,12 +155,12 @@ fun SyncScreen(
                 Text("Arm one acknowledgement")
             }
         }
-        if (ui.canSend) {
+        if (ui.canCancel) {
             Button(
-                onClick = onSendAck,
-                modifier = Modifier.testTag("sync_ack_send"),
+                onClick = onCancelAck,
+                modifier = Modifier.testTag("sync_ack_cancel"),
             ) {
-                Text("Send one acknowledgement")
+                Text("Cancel acknowledgement")
             }
         }
     }

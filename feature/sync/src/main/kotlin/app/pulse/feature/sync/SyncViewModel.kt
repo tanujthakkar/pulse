@@ -19,7 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
  * [app.pulse.link.StrapLinkService], so pausing or stopping the Activity does
  * not cancel the attempt. The button stays disabled while the attempt runs.
  * Production acknowledgements stay behind the metadata gate. One acknowledgement
- * can be armed and sent from this screen, and that consent is off until the tap.
+ * can be armed here before Sync now. That consent is off until the tap and is
+ * not a send button.
  */
 @HiltViewModel
 class SyncViewModel @Inject constructor(
@@ -38,10 +39,10 @@ class SyncViewModel @Inject constructor(
     }
 
     fun armOneShot() {
-        sync.armOneShot()
+        sync.armOneShot(link.snapshot().helloFirmware)
     }
 
-    fun sendOneShot() {
-        sync.sendOneShot(link.snapshot().helloFirmware)
+    fun cancelOneShot() {
+        sync.cancelOneShot()
     }
 }

@@ -36,13 +36,21 @@ import java.util.concurrent.atomic.AtomicLong
  * are not a token: they are not stored and not acknowledged. The
  * acknowledgement body is `01` plus the original token bytes.
  *
- * [ackEnabled] is the production gate. When it is false the chunk is still
- * committed and no command 23 frame is handed to [transmit]. Callers serialize
- * [start], [onNotification], [onDisconnect], and [onWatchdog].
+ * [ackEnabled] is the production gate. When it is false, and the one-shot
+ * callback does not claim the chunk, no command 23 frame is handed to
+ * [transmit]. Callers serialize [start], [onNotification], [onDisconnect],
+ * and [onWatchdog].
+ *
+ * [onDurableChunk] runs only after [SyncStore.commitChunk] has returned and
+ * the stored row was read back. A true result claims the single diagnostic
+ * write for this attempt. That write uses [FrameCodec] directly, opens the
+ * request tracker, and does not call [app.pulse.wire.codec.CommandFrames] or
+ * [app.pulse.wire.codec.HistoryAckGate.maySend]. A false result leaves the
+ * production [ackEnabled] path unchanged. The two paths do not both write.
  *
  * Commands sent from here are clock get, clock set, data range, history start,
- * and, only when [ackEnabled] is true, history ack. Deny-listed cursor commands
- * are not sent.
+ * and history ack only through one of those two paths. Deny-listed cursor
+ * commands are not sent.
  */
 class HistorySyncEngine(
     private val address: String,
@@ -54,7 +62,9 @@ class HistorySyncEngine(
     private val onFinished: (SessionOutcome) -> Unit = {},
     private val onStreamPulse: () -> Unit = {},
     private val onProgress: (SyncSnapshot) -> Unit = {},
-    private val onDurableChunk: (DurableChunk) -> Unit = {},
+    private val onDurableChunk: (DurableChunk) -> Boolean = { false },
+    private val onAckHandoff: (Boolean) -> Unit = {},
+    private val onAckResult: (Int) -> Unit = {},
 ) {
     val specVersion: String = ProtocolSpecVersion.CURRENT
 
@@ -107,6 +117,7 @@ class HistorySyncEngine(
     private var savedChunks = 0
     private var sawStart = false
     private val handledTokens = HashSet<String>()
+    private var oneShotUsed = false
     private var sequence = 1
     private var sessionId: Long? = null
     private var sessionClosed = false
@@ -199,7 +210,9 @@ class HistorySyncEngine(
             SyncPhase.CLOCK_SET -> onClockSet(match)
             SyncPhase.RANGE -> onRange(match, body)
             SyncPhase.START -> onHistoryStart(match, body)
-            SyncPhase.STREAM -> Unit
+            SyncPhase.STREAM -> if (match.command == HistoryAckCommand.NUMBER) {
+                onAckResult(match.result)
+            }
             SyncPhase.IDLE, SyncPhase.DONE -> Unit
         }
     }
@@ -418,18 +431,28 @@ class HistorySyncEngine(
         } catch (error: Exception) {
             null
         }
-        if (stored != null && stored.ackedAt == null && HistoryAckCommand.sendable(kept)) {
-            onDurableChunk(
-                DurableChunk(
-                    chunkId = stored.chunkId,
-                    sessionId = stored.sessionId,
-                    token = kept.copyOf(),
-                    sampleCount = stored.sampleCount,
-                ),
-            )
-        }
+        val oneShotClaimed = stored != null && onDurableChunk(
+            DurableChunk(
+                chunkId = stored.chunkId,
+                sessionId = stored.sessionId,
+                token = kept.copyOf(),
+                sampleCount = stored.sampleCount,
+            ),
+        )
         refreshSaved()
         publish()
+        if (oneShotClaimed) {
+            if (!oneShotUsed) {
+                oneShotUsed = true
+                val wrote = if (active && HistoryAckCommand.sendable(kept)) {
+                    writeOneShot(session, kept)
+                } else {
+                    false
+                }
+                onAckHandoff(wrote)
+            }
+            return
+        }
         if (!active || !ackEnabled()) return
         if (!HistoryMetadata.echoable(kept)) return
         val body = HistoryAckCommand.body(kept)
@@ -452,6 +475,39 @@ class HistorySyncEngine(
         } catch (error: Exception) {
             finish(SessionOutcome.ABORTED)
         }
+    }
+
+    /**
+     * One diagnostic command 23 after a commit the callback has claimed.
+     *
+     * The request is opened before the write and abandoned when the link
+     * refuses the bytes, so a later type 36 cannot be reported as this write's
+     * result. A bookkeeping failure after a successful handoff does not write
+     * again. This does not finish the attempt.
+     */
+    private fun writeOneShot(session: Long, token: ByteArray): Boolean {
+        if (!HistoryAckCommand.sendable(token)) return false
+        val body = HistoryAckCommand.body(token)
+        val seq = nextSequence()
+        val ackFrame = FrameCodec.encode(
+            headerWord = HeaderWord.COMMON_REQUEST,
+            packetType = PacketType.COMMAND,
+            sequence = seq,
+            command = HistoryAckCommand.NUMBER,
+            body = body,
+        )
+        tracker.open(connection, HistoryAckCommand.NUMBER, seq)
+        if (!transmit(ackFrame)) {
+            tracker.abandon(connection, HistoryAckCommand.NUMBER, seq)
+            return false
+        }
+        trace += SyncTrace.Ack(token.copyOf(), body.copyOf())
+        try {
+            store.markAcknowledged(session, token, phone.now().unixSeconds)
+        } catch (error: Exception) {
+            // The bytes were already handed to the link. Do not write them again.
+        }
+        return true
     }
 
     private fun send(command: Int, body: ByteArray): Boolean {
