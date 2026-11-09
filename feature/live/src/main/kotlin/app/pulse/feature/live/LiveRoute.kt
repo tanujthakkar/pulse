@@ -13,6 +13,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun LiveRoute(viewModel: LiveViewModel = hiltViewModel()) {
     val phase by viewModel.phase.collectAsState()
     val latest by viewModel.latest.collectAsState()
+    val channel by viewModel.channel.collectAsState()
     var trace by remember { mutableStateOf<List<Int>>(emptyList()) }
     LaunchedEffect(latest) {
         val sample = latest
@@ -22,5 +23,5 @@ fun LiveRoute(viewModel: LiveViewModel = hiltViewModel()) {
             appendTrace(trace, displayedBpm(sample.bpm))
         }
     }
-    LiveScreen(ui = liveUi(phase, latest, trace))
+    LiveScreen(ui = liveUi(phase, latest, trace, channel))
 }

@@ -49,6 +49,7 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     testImplementation(project(":ble"))
+    testImplementation(project(":sync"))
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)

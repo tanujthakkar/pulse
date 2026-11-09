@@ -57,17 +57,49 @@ interface SyncStore {
     )
 
     /**
-     * Records that an acknowledgement for [token] was handed to the link.
+     * Records that the strap returned result 1 for [token].
      *
      * The token is the original 8 bytes. This does not send the acknowledgement.
-     * A missing chunk leaves the store unchanged.
+     * A missing chunk leaves the store unchanged. A radio handoff, a result of
+     * 0, a pending result, and a missing result do not call this.
      */
     fun markAcknowledged(
         sessionId: Long,
         token: ByteArray,
         ackedUnixSeconds: Long,
     )
+
+    /**
+     * Counts rows already stored on this phone.
+     *
+     * [SavedCounts.samples] is layout-18 rows. [SavedCounts.chunks] is chunk
+     * rows. This is a read of local storage, not a count of frames received
+     * on the current attempt.
+     */
+    fun savedCounts(): SavedCounts
+
+    /**
+     * The chunk already stored for [token] on the device that owns [sessionId].
+     *
+     * Null when that session or chunk is absent. This does not send an
+     * acknowledgement and does not create a row.
+     */
+    fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk?
 }
+
+/** A chunk row that survived [SyncStore.commitChunk]. */
+data class PersistedChunk(
+    val chunkId: Long,
+    val sessionId: Long,
+    val sampleCount: Int,
+    val ackedAt: Long?,
+)
+
+/** Local-storage totals from [SyncStore.savedCounts]. */
+data class SavedCounts(
+    val samples: Int,
+    val chunks: Int,
+)
 
 /** End-token length from spec §8. */
 const val HISTORY_TOKEN_BYTES: Int = 8

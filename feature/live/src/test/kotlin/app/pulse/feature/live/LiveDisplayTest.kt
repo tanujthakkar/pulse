@@ -1,5 +1,6 @@
 package app.pulse.feature.live
 
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import app.pulse.ble.SensorContact
 import app.pulse.link.LinkPhase
@@ -55,9 +56,42 @@ class LiveDisplayTest {
     fun idleWithoutASampleShowsThePlaceholder() {
         val ui = liveUi(LinkPhase.IDLE, sample = null, trace = emptyList())
         assertEquals("Open Connect and start a search.", ui.status)
+        assertEquals("Heart Rate Measurement is not subscribed.", ui.measurement)
         assertEquals(LIVE_BPM_PLACEHOLDER, ui.bpm)
         assertEquals(LIVE_BPM_PLACEHOLDER, ui.rr)
         assertNull(ui.contact)
+    }
+
+    @Test
+    fun subscribedWithNoNotificationLeavesBpmUnavailable() {
+        val ui = liveUi(
+            phase = LinkPhase.LINKED,
+            sample = null,
+            trace = emptyList(),
+            channel = HeartRateChannel(subscribed = true, notifications = 0),
+        )
+        assertEquals("Connected.", ui.status)
+        assertEquals(
+            "Heart Rate Measurement is subscribed. No notifications have arrived. " +
+                "Pulse does not send a realtime-enable command, so bpm stays unavailable.",
+            ui.measurement,
+        )
+        assertEquals(LIVE_BPM_PLACEHOLDER, ui.bpm)
+    }
+
+    @Test
+    fun aRejectedNotificationIsCountedWithoutABpm() {
+        val ui = liveUi(
+            phase = LinkPhase.LINKED,
+            sample = null,
+            trace = emptyList(),
+            channel = HeartRateChannel(subscribed = true, notifications = 2),
+        )
+        assertEquals(
+            "Heart Rate Measurement notifications: 2. None could be shown.",
+            ui.measurement,
+        )
+        assertEquals(LIVE_BPM_PLACEHOLDER, ui.bpm)
     }
 
     @Test

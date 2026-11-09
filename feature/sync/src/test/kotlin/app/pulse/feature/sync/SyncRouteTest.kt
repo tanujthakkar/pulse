@@ -4,18 +4,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import app.pulse.ble.BondBegin
+import app.pulse.ble.DeviceBond
 import app.pulse.link.HistorySyncHost
+import app.pulse.link.LinkAlarm
+import app.pulse.link.LinkClock
+import app.pulse.link.LinkPorts
 import app.pulse.link.StrapCommandPort
+import app.pulse.link.StrapLink
 import app.pulse.sync.ChunkReceipt
+import app.pulse.sync.PersistedChunk
 import app.pulse.sync.PhoneTime
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
+import app.pulse.sync.SavedCounts
 import app.pulse.sync.SessionOutcome
 import app.pulse.sync.SyncActivity
 import app.pulse.sync.SyncPhase
@@ -35,11 +46,15 @@ class SyncRouteTest {
 
     @Test
     fun syncNowWithoutALinkShowsTheNoticeAndLeavesTheButtonEnabled() {
-        val viewModel = SyncViewModel(HistorySyncHost(StrapCommandPort(), UnusedSyncStore()))
+        val viewModel = SyncViewModel(
+            HistorySyncHost(StrapCommandPort(), UnusedSyncStore(), quietLink()),
+        )
         compose.setContent { SyncRoute(viewModel) }
         compose.onNodeWithTag("sync_state").assertTextEquals("Idle")
-        compose.onNodeWithTag("sync_chunks").assertTextEquals("0")
+        compose.onNodeWithTag("sync_chunks").assertTextEquals(chunkLine(SyncActivity()))
         compose.onNodeWithTag("sync_records").assertTextEquals("0")
+        compose.onNodeWithTag("sync_saved_records").assertTextEquals("0")
+        compose.onNodeWithTag("sync_saved_chunks").assertTextEquals("0")
         compose.onNodeWithTag("sync_outcome").assertTextEquals("—")
         compose.onNodeWithTag("sync_time").assertTextEquals("—")
         compose.onNodeWithTag("sync_now").performScrollTo().assertIsEnabled().performClick()
@@ -47,28 +62,48 @@ class SyncRouteTest {
         compose.onNodeWithTag("sync_notice").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("sync_now").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("sync_busy").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextEquals(
+            syncUi(SyncActivity()).ackWarning,
+        )
+        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextContains(
+            "Strap result 1: 0",
+            substring = true,
+        )
+        compose.onNodeWithTag("sync_ack_status").assertTextContains("GATT status 0", substring = true)
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOn()
+        compose.onNodeWithTag("sync_ack_arm").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
         assertEquals("0:0", viewModel.modulePins)
     }
 
     @Test
     fun aRunningSyncDisablesTheButtonAndShowsLiveCounts() {
         var clicks = 0
+        val activity = SyncActivity(
+            phase = SyncPhase.STREAM,
+            running = true,
+            chunks = 1,
+            records = 9,
+            endsReceived = 5,
+            endsRetried = 4,
+            savedSamples = 12,
+            savedChunks = 2,
+            outcome = SessionOutcome.WATCHDOG,
+            finishedAt = PhoneTime(1L, 0),
+        )
         compose.setContent {
             SyncScreen(
-                ui = syncUi(
-                    SyncActivity(
-                        phase = SyncPhase.STREAM,
-                        running = true,
-                        chunks = 3,
-                        records = 9,
-                    ),
-                ),
+                ui = syncUi(activity),
                 onSyncNow = { clicks += 1 },
             )
         }
         compose.onNodeWithTag("sync_state").assertTextEquals("Receiving history")
-        compose.onNodeWithTag("sync_chunks").assertTextEquals("3")
+        compose.onNodeWithTag("sync_chunks").assertTextEquals(chunkLine(activity))
         compose.onNodeWithTag("sync_records").assertTextEquals("9")
+        compose.onNodeWithTag("sync_saved_records").assertTextEquals("12")
+        compose.onNodeWithTag("sync_saved_chunks").assertTextEquals("2")
+        compose.onNodeWithTag("sync_outcome").assertTextEquals("—")
+        compose.onNodeWithTag("sync_time").assertTextEquals("—")
         compose.onNodeWithTag("sync_busy").assertIsDisplayed()
         compose.onNodeWithTag("sync_now").assertIsNotEnabled()
         compose.onNodeWithTag("sync_error").assertDoesNotExist()
@@ -97,7 +132,6 @@ class SyncRouteTest {
             clicks = 0
             compose.runOnIdle { outcome.value = current }
             compose.onNodeWithTag("sync_state").assertTextEquals("Finished")
-            compose.onNodeWithTag("sync_chunks").assertTextEquals("1")
             compose.onNodeWithTag("sync_records").assertTextEquals("2")
             compose.onNodeWithTag("sync_time").performScrollTo().assertTextEquals("1700000000 s, 0 ticks")
             compose.onNodeWithTag("sync_now").performScrollTo().assertIsEnabled().performClick()
@@ -106,12 +140,68 @@ class SyncRouteTest {
                 compose.onNodeWithTag("sync_error").assertDoesNotExist()
                 compose.onNodeWithTag("sync_outcome").performScrollTo().assertTextEquals("History finished.")
             } else {
-                compose.onNodeWithTag("sync_error").performScrollTo().assertTextEquals(outcomeMessage(current))
+                compose.onNodeWithTag("sync_error").performScrollTo().assertTextEquals(
+                    outcomeMessage(current, committedChunks = 1, droppedUncommitted = false),
+                )
                 compose.onNodeWithTag("sync_outcome").assertDoesNotExist()
             }
         }
     }
+
+    @Test
+    fun theSwitchReportsTheNewValueAndDoesNotSend() {
+        var enabled = true
+        compose.setContent {
+            SyncScreen(
+                ui = syncUi(SyncActivity(historyAckEnabled = enabled)),
+                onSyncNow = {},
+                onAckEnabled = { enabled = it },
+            )
+        }
+        compose.onNodeWithTag("sync_ack_send").assertDoesNotExist()
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOn().performClick()
+        assertEquals(false, enabled)
+        compose.onNodeWithTag("sync_ack_warning").performScrollTo().assertTextContains("reclaim", substring = true)
+    }
+
+    @Test
+    fun anOffSwitchDescribesSavingWithoutCommand23() {
+        compose.setContent {
+            SyncScreen(
+                ui = syncUi(SyncActivity(historyAckEnabled = false)),
+                onSyncNow = {},
+            )
+        }
+        compose.onNodeWithTag("sync_ack_switch").performScrollTo().assertIsOff()
+        compose.onNodeWithTag("sync_ack_status").performScrollTo().assertTextContains(
+            "does not send command 23",
+            substring = true,
+        )
+    }
 }
+
+private fun quietLink(): StrapLink = StrapLink(
+    ports = object : LinkPorts {
+        override fun startScan() = Unit
+
+        override fun stopScan() = Unit
+
+        override fun bondOf(address: String): DeviceBond = DeviceBond.ABSENT
+
+        override fun beginBond(address: String): BondBegin = BondBegin.NOT_STARTED
+
+        override fun cancelBond() = Unit
+
+        override fun openSession(address: String) = Unit
+
+        override fun closeSession() = Unit
+
+        override fun watchHeartRate(address: String) = Unit
+    },
+    clock = object : LinkClock {
+        override fun after(delayMs: Long, task: () -> Unit): LinkAlarm = LinkAlarm { }
+    },
+)
 
 private class UnusedSyncStore : SyncStore {
     override fun openSession(
@@ -135,9 +225,13 @@ private class UnusedSyncStore : SyncStore {
         endedSubsecondTicks: Int?,
     ) = error("unused")
 
-    override fun markAcknowledged(
-        sessionId: Long,
-        token: ByteArray,
-        ackedUnixSeconds: Long,
-    ) = error("unused")
+        override fun markAcknowledged(
+            sessionId: Long,
+            token: ByteArray,
+            ackedUnixSeconds: Long,
+        ) = error("unused")
+
+        override fun savedCounts(): SavedCounts = error("unused")
+
+        override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = error("unused")
 }

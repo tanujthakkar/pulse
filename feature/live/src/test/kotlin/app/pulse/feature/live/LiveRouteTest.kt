@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import app.pulse.ble.BondBegin
 import app.pulse.ble.DeviceBond
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import app.pulse.ble.SensorContact
 import app.pulse.link.LinkAlarm
@@ -33,6 +34,8 @@ class LiveRouteTest {
         compose.setContent { LiveRoute(viewModel) }
         compose.onNodeWithTag("live_bpm").assertTextEquals("—")
         compose.onNodeWithText("Open Connect and start a search.").assertIsDisplayed()
+        compose.onNodeWithTag("live_measurement")
+            .assertTextEquals("Heart Rate Measurement is not subscribed.")
 
         compose.runOnIdle {
             feed.publish(
@@ -79,6 +82,21 @@ class LiveRouteTest {
         }
         compose.onNodeWithTag("live_sparkline").assertIsDisplayed()
         compose.onNodeWithText("62").assertIsDisplayed()
+    }
+
+    @Test
+    fun subscribedSilenceStaysOnScreenWithoutABpm() {
+        val feed = LiveHeartRateFeed()
+        val viewModel = LiveViewModel(quietLink(), feed)
+        compose.setContent { LiveRoute(viewModel) }
+        compose.runOnIdle {
+            feed.applyChannel(HeartRateChannel(subscribed = true, notifications = 0))
+        }
+        compose.onNodeWithTag("live_measurement").assertTextEquals(
+            "Heart Rate Measurement is subscribed. No notifications have arrived. " +
+                "Pulse does not send a realtime-enable command, so bpm stays unavailable.",
+        )
+        compose.onNodeWithTag("live_bpm").assertTextEquals("—")
     }
 }
 

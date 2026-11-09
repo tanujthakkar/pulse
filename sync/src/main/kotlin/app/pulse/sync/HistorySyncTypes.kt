@@ -116,30 +116,171 @@ enum class SyncPhase {
 /**
  * Live view of the attempt in progress.
  *
- * [chunks] counts end tokens committed on this attempt, including a token that
- * was already stored. [records] counts history records received, including a
- * chunk that is later dropped. [outcome] stays null until the attempt ends.
+ * [chunks] counts end tokens newly stored on this attempt. A token that was
+ * already stored is [chunksDuplicate], and a later copy of a token already
+ * handled on this attempt is [endsRetried]. [records] counts history records
+ * received, including a chunk that is later dropped. [savedSamples] and
+ * [savedChunks] are the last local-storage counts. [outcome] stays null until
+ * the attempt ends.
  */
 data class SyncSnapshot(
     val phase: SyncPhase,
     val chunks: Int,
     val records: Int,
     val outcome: SessionOutcome?,
+    val endsReceived: Int = 0,
+    val chunksDuplicate: Int = 0,
+    val endsRetried: Int = 0,
+    val endsRejected: Int = 0,
+    val ignoredCompletes: Int = 0,
+    val droppedUncommitted: Boolean = false,
+    val savedSamples: Int = 0,
+    val savedChunks: Int = 0,
+    val ackSent: Int = 0,
+    val ackResult1: Int = 0,
+    val ackResult0: Int = 0,
+    val ackPending: Int = 0,
+    val ackUnanswered: Int = 0,
+    val ackRadioRefused: Int = 0,
+    val ackSkipped: Int = 0,
+    val ackEligibleRecords: Int = 0,
+    val lastAckResult: Int? = null,
+    val lastAckKind: AckKind = AckKind.NONE,
+    val ackNote: String? = null,
 )
+
+/**
+ * The latest acknowledgement event on an attempt.
+ *
+ * [HANDED_OFF] means the link accepted the bytes. That is not a strap result.
+ * [RESULT] is a final type-36 code. [NO_RESPONSE] means the attempt ended
+ * with no final code. [SKIPPED] means validation or the switch sent nothing.
+ */
+enum class AckKind {
+    NONE,
+    HANDED_OFF,
+    RADIO_REFUSED,
+    PENDING,
+    RESULT,
+    NO_RESPONSE,
+    SKIPPED,
+}
+
+/**
+ * Hello firmware this build will acknowledge.
+ *
+ * 50.43.1.0 accepted a command 23 sent after the chunk was stored, returned
+ * result 1, and the following sync no longer offered that chunk. Other
+ * firmware versions are saved and not acknowledged.
+ */
+object HistoryAckFirmware {
+    const val ALLOWED: String = "50.43.1.0"
+
+    fun allows(firmware: String?): Boolean = firmware == ALLOWED
+}
+
+/**
+ * The user kill switch for history acknowledgement.
+ *
+ * The default is on. Turning it off stops new command 23 writes and does not
+ * erase chunks already stored.
+ */
+interface HistoryAckEnabled {
+    fun enabled(): Boolean
+
+    fun setEnabled(enabled: Boolean)
+}
+
+/**
+ * Sentences the Sync screen and the debug export share.
+ *
+ * GATT status 0 is named as a radio result. It is never described as a strap
+ * result.
+ */
+fun historyAckReport(activity: SyncActivity): String {
+    if (!activity.historyAckEnabled && activity.ackSent == 0 && activity.ackNote == null) {
+        return "History acknowledgement is off. Sync saves chunks and does not send command 23."
+    }
+    val parts = mutableListOf(
+        "Strap result 1: ${activity.ackResult1} chunks. " +
+            "Layout-18 rows the strap may reclaim: ${activity.ackEligibleRecords}.",
+    )
+    if (activity.ackResult0 > 0) {
+        parts += "Strap result 0: ${activity.ackResult0}. The boundary was not updated. Not retried this sync."
+    }
+    if (activity.ackPending > 0) {
+        parts += "Pending: ${activity.ackPending}. Pending is not success."
+    }
+    if (activity.ackUnanswered > 0) {
+        parts += "No strap result: ${activity.ackUnanswered}. That is not success and is not retried this sync."
+    }
+    if (activity.ackRadioRefused > 0) {
+        parts += "The radio refused ${activity.ackRadioRefused}. Not retried this sync."
+    }
+    if (activity.ackSkipped > 0) {
+        parts += "Not sent: ${activity.ackSkipped}."
+    }
+    if (activity.lastAckKind == AckKind.HANDED_OFF) {
+        parts += "The last acknowledgement was passed to the radio. " +
+            "GATT status 0 and a successful write are not a strap result."
+    }
+    if (activity.lastAckKind == AckKind.RESULT && activity.lastAckResult == 1) {
+        parts += "The last strap result was 1. That can let the strap reclaim that chunk. " +
+            "It does not prove the reclaim finished."
+    }
+    activity.ackNote?.let { parts += it }
+    parts += "GATT status 0 is a radio result. It is not a strap result."
+    return parts.joinToString(separator = " ")
+}
+
+/** In-memory switch for tests and for a host that has not been given storage. */
+class MemoryHistoryAck(private var on: Boolean = true) : HistoryAckEnabled {
+    override fun enabled(): Boolean = on
+
+    override fun setEnabled(enabled: Boolean) {
+        on = enabled
+    }
+}
 
 /**
  * What the sync screen observes.
  *
- * [outcome] and [finishedAt] stay in place until the next attempt ends.
- * [chunks] and [records] reset when a new attempt starts. [blocked] is set
- * when Sync now is tapped with no strap linked.
+ * [outcome] and [finishedAt] clear when a new attempt starts. A tap with no
+ * strap linked leaves them in place. [chunks] counts tokens newly stored on
+ * this attempt. [savedSamples] and [savedChunks] are local-storage counts.
+ * [blocked] is set when Sync now is tapped with no strap linked.
+ *
+ * Acknowledgement counters are for this attempt. [ackResult1] counts strap
+ * result 1 only. [ackEligibleRecords] is the layout-18 rows in those chunks.
+ * A stored acknowledgement time is not a consent flag and is not read to
+ * decide whether to send.
  */
 data class SyncActivity(
     val phase: SyncPhase = SyncPhase.IDLE,
     val running: Boolean = false,
     val chunks: Int = 0,
     val records: Int = 0,
+    val endsReceived: Int = 0,
+    val chunksDuplicate: Int = 0,
+    val endsRetried: Int = 0,
+    val endsRejected: Int = 0,
+    val ignoredCompletes: Int = 0,
+    val droppedUncommitted: Boolean = false,
+    val savedSamples: Int = 0,
+    val savedChunks: Int = 0,
     val outcome: SessionOutcome? = null,
     val finishedAt: PhoneTime? = null,
     val blocked: String? = null,
+    val historyAckEnabled: Boolean = true,
+    val ackSent: Int = 0,
+    val ackResult1: Int = 0,
+    val ackResult0: Int = 0,
+    val ackPending: Int = 0,
+    val ackUnanswered: Int = 0,
+    val ackRadioRefused: Int = 0,
+    val ackSkipped: Int = 0,
+    val ackEligibleRecords: Int = 0,
+    val lastAckResult: Int? = null,
+    val lastAckKind: AckKind = AckKind.NONE,
+    val ackNote: String? = null,
 )

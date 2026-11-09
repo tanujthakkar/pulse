@@ -12,10 +12,18 @@ import app.pulse.ble.BondBegin
 import app.pulse.ble.DeviceBond
 import app.pulse.data.DeviceDirectory
 import app.pulse.data.DeviceRow
+import app.pulse.link.HistorySyncHost
 import app.pulse.link.LinkAlarm
 import app.pulse.link.LinkClock
 import app.pulse.link.LinkPorts
+import app.pulse.link.StrapCommandPort
 import app.pulse.link.StrapLink
+import app.pulse.sync.ChunkReceipt
+import app.pulse.sync.PersistedChunk
+import app.pulse.sync.R18Draft
+import app.pulse.sync.RawFrameDraft
+import app.pulse.sync.SavedCounts
+import app.pulse.sync.SyncStore
 import app.pulse.wire.codec.CommandResult
 import app.pulse.wire.codec.FrameCodec
 import app.pulse.wire.codec.FrameIntake
@@ -42,7 +50,8 @@ class DebugScreenTest {
     fun listIsNewestFirstAndFiltersPauseAndExpand() {
         val ring = FrameRing()
         val intake = FrameIntake(ring)
-        val viewModel = DebugViewModel(quietLink(), EmptyDevices(), ring)
+        val link = quietLink()
+        val viewModel = DebugViewModel(link, EmptyDevices(), quietSync(link), ring)
         compose.setContent { DebugRoute(viewModel) }
         compose.onNodeWithTag("debug_empty").assertIsDisplayed()
         compose.onNodeWithText("redacted and are not stored", substring = true).assertExists()
@@ -70,8 +79,9 @@ class DebugScreenTest {
         compose.onNodeWithText("SECRETBLOCK", substring = true).assertDoesNotExist()
 
         compose.onNodeWithTag("debug_pause").performClick()
-        compose.onNodeWithTag("debug_pause").assertTextContains("Resume")
-        compose.onNodeWithTag("debug_count").assertTextContains("Paused.", substring = true)
+        compose.onNodeWithTag("debug_pause").assertTextContains("Resume recording")
+        compose.onNodeWithTag("debug_count").assertTextContains("Recording is paused.", substring = true)
+        compose.onNodeWithTag("debug_count").assertTextContains("can miss traffic", substring = true)
         compose.runOnIdle {
             intake.offer(true, "2a37", false, byteArrayOf(0x00, 0x48), 2L)
         }
@@ -104,6 +114,39 @@ class DebugScreenTest {
         override fun latest(): DeviceRow? = null
     }
 }
+
+private fun quietSync(link: StrapLink): HistorySyncHost = HistorySyncHost(
+    StrapCommandPort(),
+    object : SyncStore {
+        override fun openSession(
+            deviceAddress: String,
+            startedUnixSeconds: Long,
+            startedSubsecondTicks: Int?,
+            rangeSnapshot: ByteArray,
+        ): Long = error("unused")
+
+        override fun commitChunk(
+            sessionId: Long,
+            frames: List<RawFrameDraft>,
+            r18Rows: List<R18Draft>,
+            archived: List<RawFrameDraft>,
+            token: ByteArray,
+        ): ChunkReceipt = error("unused")
+
+        override fun closeSession(
+            sessionId: Long,
+            endedUnixSeconds: Long,
+            endedSubsecondTicks: Int?,
+        ) = error("unused")
+
+        override fun markAcknowledged(sessionId: Long, token: ByteArray, ackedUnixSeconds: Long) = error("unused")
+
+        override fun savedCounts(): SavedCounts = error("unused")
+
+        override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = error("unused")
+    },
+    link,
+)
 
 private fun quietLink(): StrapLink = StrapLink(
     ports = object : LinkPorts {

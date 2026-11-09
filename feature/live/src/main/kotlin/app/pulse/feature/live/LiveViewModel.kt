@@ -1,6 +1,7 @@
 package app.pulse.feature.live
 
 import androidx.lifecycle.ViewModel
+import app.pulse.ble.HeartRateChannel
 import app.pulse.ble.LiveHeartRate
 import app.pulse.data.DataBuildInfo
 import app.pulse.link.LinkBuildInfo
@@ -25,6 +26,7 @@ class LiveViewModel @Inject constructor(
     private val phases = MutableStateFlow(link.snapshot().phase)
     val phase: StateFlow<LinkPhase> = phases.asStateFlow()
     val latest: StateFlow<LiveHeartRate?> = heartRate.latest
+    val channel: StateFlow<HeartRateChannel> = heartRate.channel
 
     /** Keeps the link and data modules on the Live classpath. */
     val modulePins: String = "${LinkBuildInfo.SPEC}:${DataBuildInfo.SPEC}"

@@ -42,8 +42,11 @@ data class SyncSessionRow(
  * One history chunk inside a session.
  *
  * [token] is the original 8-byte end token. [ackedAt] is Unix seconds UTC when
- * an acknowledgement has been handed to the link. [SyncStore.commitChunk]
- * leaves it null. [SyncStore.markAcknowledged] writes it after that handoff.
+ * the strap returned result 1 for that token. [SyncStore.commitChunk] leaves
+ * it null. [SyncStore.markAcknowledged] writes it only after that result.
+ * Result 0, a pending result, a missing result, and a refused write leave it
+ * null. A non-null value means result 1 at that time. There is no separate
+ * result column.
  */
 @Entity(
     tableName = "sync_chunk",

@@ -5,6 +5,7 @@ import app.pulse.data.DataBuildInfo
 import app.pulse.data.DeviceDirectory
 import app.pulse.data.DeviceRow
 import app.pulse.link.LinkBuildInfo
+import app.pulse.link.HistorySyncHost
 import app.pulse.link.LinkSnapshot
 import app.pulse.link.StrapLink
 import app.pulse.link.commandBatteryLine
@@ -28,7 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Hello identity blocks are not on [LinkSnapshot] and are not stored, so this
  * text cannot print them.
  */
-fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?): String {
+fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?, acknowledgement: String? = null): String {
     val lines = mutableListOf("Identity blocks from hello are redacted and are not stored.")
     handshakeLine(snapshot.hello, snapshot.heartRateLive)?.let { lines += it }
     helloFirmwareLine(snapshot.helloFirmware)?.let { lines += it }
@@ -45,6 +46,9 @@ fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?): String {
         stored.commandBatteryPercent?.let { lines += "Stored battery (command 26): $it%" }
         stored.serviceBatteryPercent?.let { lines += "Stored battery (standard battery service): $it%" }
     }
+    if (acknowledgement != null) {
+        lines += acknowledgement
+    }
     return lines.joinToString(separator = "\n")
 }
 
@@ -59,6 +63,7 @@ fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?): String {
 class DebugViewModel @Inject constructor(
     link: StrapLink,
     private val devices: DeviceDirectory,
+    private val sync: HistorySyncHost,
     val frames: FrameRing,
 ) : ViewModel() {
     val title: String = "Debug"
@@ -66,7 +71,7 @@ class DebugViewModel @Inject constructor(
     /** Keeps the link and data modules on the debug classpath. */
     val modulePins: String = "${LinkBuildInfo.SPEC}:${DataBuildInfo.SPEC}"
 
-    private val _body = MutableStateFlow(debugBody(link.snapshot(), devices.latest()))
+    private val _body = MutableStateFlow(debugBody(link.snapshot(), devices.latest(), sync.acknowledgementNote()))
     val body: StateFlow<String> = _body.asStateFlow()
 
     private val _paused = MutableStateFlow(frames.paused)
@@ -88,10 +93,14 @@ class DebugViewModel @Inject constructor(
     val exportStatus: StateFlow<String> = _exportStatus.asStateFlow()
 
     private val unwatchFrames: () -> Unit
+    private val unwatchSync: () -> Unit
 
     init {
         link.watch { snapshot ->
-            _body.value = debugBody(snapshot, devices.latest())
+            _body.value = debugBody(snapshot, devices.latest(), sync.acknowledgementNote())
+        }
+        unwatchSync = sync.watch {
+            _body.value = debugBody(link.snapshot(), devices.latest(), sync.acknowledgementNote())
         }
         unwatchFrames = frames.watch { publish() }
         publish()
@@ -114,6 +123,7 @@ class DebugViewModel @Inject constructor(
 
     override fun onCleared() {
         unwatchFrames()
+        unwatchSync()
     }
 
     private fun publish() {

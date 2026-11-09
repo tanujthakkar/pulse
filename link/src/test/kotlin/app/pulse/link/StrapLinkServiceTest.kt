@@ -11,8 +11,10 @@ import app.pulse.ble.CloseReason
 import app.pulse.ble.DeviceBond
 import app.pulse.ble.StrapSighting
 import app.pulse.sync.ChunkReceipt
+import app.pulse.sync.PersistedChunk
 import app.pulse.sync.R18Draft
 import app.pulse.sync.RawFrameDraft
+import app.pulse.sync.SavedCounts
 import app.pulse.sync.SyncStore
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.FrameCodec
@@ -162,7 +164,7 @@ class StrapLinkServiceTest {
             ),
         )
         assertEquals(LinkPhase.LINKED, link.snapshot().phase)
-        val sync = HistorySyncHost(commands, UnusedSyncStore())
+        val sync = HistorySyncHost(commands, UnusedSyncStore(), link)
         return Fixture(link, commands, sync, written)
     }
 
@@ -222,6 +224,10 @@ class StrapLinkServiceTest {
             token: ByteArray,
             ackedUnixSeconds: Long,
         ) = error("not used")
+
+        override fun savedCounts(): SavedCounts = error("not used")
+
+        override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? = error("not used")
     }
 
     private fun foregroundType(shadow: ShadowService): Int {

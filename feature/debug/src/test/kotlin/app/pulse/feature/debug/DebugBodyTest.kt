@@ -36,5 +36,26 @@ class DebugBodyTest {
         assertTrue(body.contains("Stored device AA:BB:CC:DD:EE:FF."))
         assertFalse(body.contains("SECRET"))
         assertFalse(body.contains("identity block"))
+        val exported = debugBody(
+            LinkSnapshot(helloFirmware = "50.43.1.0"),
+            null,
+            "Strap result 1: 1 chunks. GATT status 0 is a radio result. It is not a strap result.",
+        )
+        assertTrue(exported.contains("Strap result 1: 1"))
+        assertTrue(exported.contains("not a strap result"))
+        assertFalse(exported.contains("GATT status 0 is success"))
+    }
+
+    @Test
+    fun recordingStatusSaysWhetherNewFramesAreStored() {
+        val running = recordingStatus(paused = false, stored = 4)
+        val paused = recordingStatus(paused = true, stored = 4)
+        assertTrue(running.contains("Recording is running."))
+        assertTrue(running.contains("New frames are stored."))
+        assertTrue(running.contains("4 stored."))
+        assertTrue(paused.contains("Recording is paused."))
+        assertTrue(paused.contains("can miss traffic"))
+        assertTrue(paused.contains("4 stored."))
+        assertFalse(paused.contains("Recording is running."))
     }
 }

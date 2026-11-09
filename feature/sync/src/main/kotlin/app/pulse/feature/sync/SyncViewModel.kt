@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
  * its time. That host, and the history engine inside it, are retained by
  * [app.pulse.link.StrapLinkService], so pausing or stopping the Activity does
  * not cancel the attempt. The button stays disabled while the attempt runs.
- * Acknowledgements stay behind the metadata gate.
+ * Production acknowledgements stay off [app.pulse.wire.codec.HistoryAckGate].
+ * Saved chunks are acknowledged when the kill switch is on and hello firmware
+ * is 50.43.1.0. The switch is on until the user turns it off.
  */
 @HiltViewModel
 class SyncViewModel @Inject constructor(
@@ -32,5 +34,9 @@ class SyncViewModel @Inject constructor(
 
     fun syncNow() {
         sync.syncNow()
+    }
+
+    fun setHistoryAckEnabled(enabled: Boolean) {
+        sync.setHistoryAckEnabled(enabled)
     }
 }

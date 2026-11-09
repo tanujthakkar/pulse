@@ -6,6 +6,9 @@ import java.security.MessageDigest
 /** In-memory [SyncStore] with the same token, frame, and sample identity rules as Room. */
 class MemorySyncStore : SyncStore {
     var failCommit: Boolean = false
+    var failMark: Boolean = false
+    var persistedReads: Int = 0
+    var hidePersistedAfter: Int = Int.MAX_VALUE
     val sessions = mutableListOf<MemorySession>()
     val chunks = mutableListOf<MemoryChunk>()
     private val frameKeys = HashSet<String>()
@@ -95,7 +98,27 @@ class MemorySyncStore : SyncStore {
         )
     }
 
+    override fun savedCounts(): SavedCounts = SavedCounts(
+        samples = sampleKeys.size,
+        chunks = chunks.size,
+    )
+
+    override fun persistedChunk(sessionId: Long, token: ByteArray): PersistedChunk? {
+        persistedReads += 1
+        if (persistedReads > hidePersistedAfter) return null
+        if (token.size != HISTORY_TOKEN_BYTES) return null
+        val session = sessions.find { it.id == sessionId } ?: return null
+        val chunk = chunks.find { it.device == session.device && it.token.contentEquals(token) } ?: return null
+        return PersistedChunk(
+            chunkId = chunk.id,
+            sessionId = chunk.sessionId,
+            sampleCount = chunk.samples.size,
+            ackedAt = chunk.ackedAt,
+        )
+    }
+
     override fun markAcknowledged(sessionId: Long, token: ByteArray, ackedUnixSeconds: Long) {
+        if (failMark) throw IllegalStateException("mark failed")
         val session = sessions.first { it.id == sessionId }
         val chunk = chunks.find { it.device == session.device && it.token.contentEquals(token) }
         if (chunk != null) chunk.ackedAt = ackedUnixSeconds

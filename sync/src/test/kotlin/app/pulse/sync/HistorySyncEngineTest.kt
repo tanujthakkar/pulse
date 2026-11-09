@@ -14,8 +14,10 @@ import app.pulse.wire.codec.DataRangeCommand
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.DeniedCommands
 import app.pulse.wire.codec.FrameCodec
+import app.pulse.wire.codec.HeaderWord
 import app.pulse.wire.codec.HistoryAckCommand
 import app.pulse.wire.codec.HistoryAckGate
+import app.pulse.wire.codec.HistoryMetadata
 import app.pulse.wire.codec.HistoryRecordDecoder
 import app.pulse.wire.codec.HistoryStartCommand
 import app.pulse.wire.codec.PacketType
@@ -31,7 +33,7 @@ class HistorySyncEngineTest {
     @Test
     fun happyPathSetsTheClockThenAcksAfterCommit() {
         val store = MemorySyncStore()
-        val token = sampleToken()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
         val record = sampleRecord()
         val script = script(
             strapUnixSeconds = PHONE + 10,
@@ -59,6 +61,10 @@ class HistorySyncEngineTest {
         assertFalse(commit(run.engine).duplicate)
         assertAckToken(run, token)
         assertEquals(PHONE, chunk.ackedAt)
+        assertEquals(1, run.engine.snapshot().ackResult1)
+        assertEquals(1, run.engine.snapshot().ackEligibleRecords)
+        assertEquals(AckKind.RESULT, run.engine.snapshot().lastAckKind)
+        assertEquals(CommandResult.SUCCESS, run.engine.snapshot().lastAckResult)
         assertAcksFollowCommits(run.engine.events)
         assertNoDeniedCommands(run.written)
         assertTrue(run.written.map { commandOf(it) }.contains(HistoryAckCommand.NUMBER))
@@ -105,22 +111,28 @@ class HistorySyncEngineTest {
     }
 
     @Test
-    fun duplicateEndAcksBothTimesAfterEachCommit() {
+    fun duplicateEndIsOneCommitAndOneRetry() {
         val store = MemorySyncStore()
-        val token = sampleToken()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
         val run = run(
             store,
             script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord()), extraEnds = 1))),
         )
         val commits = run.engine.events.filterIsInstance<SyncTrace.Commit>()
-        assertEquals(2, commits.size)
+        assertEquals(1, commits.size)
         assertFalse(commits[0].duplicate)
-        assertTrue(commits[1].duplicate)
         assertEquals(1, store.chunks.size)
+        assertEquals(1, store.savedCounts().samples)
+        assertEquals(1, store.savedCounts().chunks)
+        val snap = run.engine.snapshot()
+        assertEquals(2, snap.endsReceived)
+        assertEquals(1, snap.chunks)
+        assertEquals(0, snap.chunksDuplicate)
+        assertEquals(1, snap.endsRetried)
+        assertEquals(1, snap.savedSamples)
         val acks = run.engine.events.filterIsInstance<SyncTrace.Ack>()
-        assertEquals(2, acks.size)
+        assertEquals(1, acks.size)
         assertArrayEquals(token, acks[0].token)
-        assertArrayEquals(token, acks[1].token)
         assertEquals(SessionOutcome.COMPLETE, run.engine.outcome)
         assertAcksFollowCommits(run.engine.events)
         assertNoDeniedCommands(run.written)
@@ -156,9 +168,10 @@ class HistorySyncEngineTest {
     @Test
     fun replayAfterReconnectIgnoresDuplicatesAndStillAcks() {
         val store = MemorySyncStore()
-        val token = sampleToken()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
         val record = sampleRecord()
         val first = run(store, script(chunks = listOf(ScriptChunk(token, listOf(record)))))
+        assertEquals(PHONE, store.chunks.single().ackedAt)
         val second = run(store, script(chunks = listOf(ScriptChunk(token, listOf(record)))))
         assertEquals(SessionOutcome.COMPLETE, second.engine.outcome)
         assertTrue(commit(second.engine).duplicate)
@@ -198,6 +211,10 @@ class HistorySyncEngineTest {
         assertEquals(1, store.chunks[1].samples.size)
         assertAcksFollowCommits(run.engine.events)
         assertEquals(2, run.strap.ackTokens.size)
+        assertEquals(2, run.engine.snapshot().ackResult1)
+        assertEquals(2, run.engine.snapshot().ackEligibleRecords)
+        assertEquals(PHONE, store.chunks[0].ackedAt)
+        assertEquals(PHONE, store.chunks[1].ackedAt)
         assertNoDeniedCommands(run.written)
     }
 
@@ -423,6 +440,356 @@ class HistorySyncEngineTest {
     }
 
     @Test
+    fun allOnesEndIsNotStoredOrAcknowledgedAndALaterTokenIs() {
+        val store = MemorySyncStore()
+        val run = run(store, script(stream = StreamKind.SILENT), ackEnabled = { true })
+        val real = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val ones = ByteArray(8) { 0xFF.toByte() }
+        run.engine.onNotification("notify", metadata(HistoryMetadata.END, ones))
+        assertTrue(store.chunks.isEmpty())
+        assertEquals(1, run.engine.snapshot().endsRejected)
+        assertEquals(0, run.engine.snapshot().chunks)
+        assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+        run.engine.onNotification("notify", metadata(HistoryMetadata.START, null))
+        run.engine.onNotification("notify", sampleRecord())
+        run.engine.onNotification("notify", metadata(HistoryMetadata.END, real))
+        run.engine.onNotification("notify", metadata(HistoryMetadata.END, real))
+        assertEquals(1, store.chunks.size)
+        assertArrayEquals(real, store.chunks.single().token)
+        assertEquals(1, store.savedCounts().samples)
+        assertEquals(1, run.engine.snapshot().chunks)
+        assertEquals(1, run.engine.snapshot().endsRetried)
+        assertEquals(1, run.engine.snapshot().savedSamples)
+        assertEquals(1, run.engine.events.filterIsInstance<SyncTrace.Ack>().size)
+        assertFalse(store.chunks.any { it.token.contentEquals(ones) })
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+        run.engine.onNotification("notify", metadata(HistoryMetadata.COMPLETE, null))
+        assertEquals(SessionOutcome.COMPLETE, run.engine.outcome)
+    }
+
+    @Test
+    fun idleCompleteDoesNotFinishAnAttempt() {
+        val written = mutableListOf<ByteArray>()
+        val engine = engine(MemorySyncStore(), ManualMillis(), written, ackEnabled = { true })
+        engine.onNotification("notify", shortComplete())
+        assertNull(engine.outcome)
+        assertFalse(engine.isActive)
+        assertEquals(0, engine.snapshot().ignoredCompletes)
+        assertTrue(written.isEmpty())
+    }
+
+    @Test
+    fun completeBeforeStartDoesNotFinishTheAttempt() {
+        val store = MemorySyncStore()
+        val run = run(store, script(stream = StreamKind.SILENT), ackEnabled = { true })
+        run.engine.onNotification("notify", shortComplete())
+        assertTrue(run.engine.isActive)
+        assertNull(run.engine.outcome)
+        assertEquals(1, run.engine.snapshot().ignoredCompletes)
+        assertTrue(store.chunks.isEmpty())
+        run.engine.onNotification("notify", metadata(HistoryMetadata.START, null))
+        run.engine.onNotification("notify", shortComplete())
+        assertEquals(SessionOutcome.COMPLETE, run.engine.outcome)
+        assertFalse(run.engine.snapshot().droppedUncommitted)
+        assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun watchdogAfterACommitKeepsTheSavedRows() {
+        val clock = ManualMillis()
+        val store = MemorySyncStore()
+        val run = run(
+            store,
+            script(stream = StreamKind.SILENT),
+            clock = clock,
+            ackEnabled = { HistoryAckGate.maySend() },
+        )
+        val token = byteArrayOf(9, 9, 9, 9, 9, 9, 9, 9)
+        run.engine.onNotification("notify", metadata(HistoryMetadata.START, null))
+        run.engine.onNotification("notify", sampleRecord())
+        run.engine.onNotification("notify", metadata(HistoryMetadata.END, token))
+        assertEquals(1, store.savedCounts().samples)
+        assertEquals(1, run.engine.snapshot().savedSamples)
+        assertEquals(1, run.engine.snapshot().chunks)
+        clock.value = HistoryLimits.WATCHDOG_MS
+        assertTrue(run.engine.onWatchdog())
+        assertEquals(SessionOutcome.WATCHDOG, run.engine.outcome)
+        assertFalse(run.engine.snapshot().droppedUncommitted)
+        assertEquals(1, run.engine.snapshot().savedSamples)
+        assertEquals(1, run.engine.snapshot().savedChunks)
+        assertTrue(run.engine.events.none { it is SyncTrace.DroppedChunk })
+        assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+    }
+
+    @Test
+    fun aResentEndDuringTransmitDoesNotSendASecondAck() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val written = mutableListOf<ByteArray>()
+        var reentered = false
+        lateinit var engine: HistorySyncEngine
+        engine = engine(store, ManualMillis(), written, ackEnabled = { true }) { frame ->
+            val decoded = FrameCodec.decode(frame)
+            if (!reentered &&
+                decoded is DecodeResult.Ok &&
+                decoded.frame.command == HistoryAckCommand.NUMBER
+            ) {
+                reentered = true
+                engine.onNotification("reenter", metadata(HistoryMetadata.END, token))
+            }
+            true
+        }
+        val run = pump(engine, written, script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        assertTrue(reentered)
+        assertEquals(SessionOutcome.COMPLETE, run.outcome)
+        assertEquals(1, written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(1, store.chunks.size)
+        assertEquals(PHONE, store.chunks.single().ackedAt)
+        assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
+    fun theNextChunkEndDuringTransmitGetsItsOwnAck() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val other = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val written = mutableListOf<ByteArray>()
+        var reentered = false
+        lateinit var engine: HistorySyncEngine
+        engine = engine(store, ManualMillis(), written, ackEnabled = { true }) { frame ->
+            val decoded = FrameCodec.decode(frame)
+            if (!reentered &&
+                decoded is DecodeResult.Ok &&
+                decoded.frame.command == HistoryAckCommand.NUMBER
+            ) {
+                reentered = true
+                engine.onNotification("reenter", metadata(HistoryMetadata.END, other))
+            }
+            true
+        }
+        pump(engine, written, script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        assertTrue(reentered)
+        assertEquals(2, written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(2, store.chunks.size)
+        assertEquals(listOf(token.toList(), other.toList()), store.chunks.map { it.token.toList() })
+        assertFalse(HistoryAckGate.maySend())
+        assertFalse(HistoryAckGate.OFFSETS_CONFIRMED)
+    }
+
+    @Test
+    fun resultZeroDoesNotMarkAndIsNotRetriedOnThisAttempt() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val run = run(
+            store,
+            script(
+                chunks = listOf(ScriptChunk(token, listOf(sampleRecord()), extraEnds = 4)),
+                ackResult = CommandResult.FAILURE,
+            ),
+        )
+        assertTrue(run.engine.isActive)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(1, run.engine.snapshot().ackResult0)
+        assertEquals(0, run.engine.snapshot().ackResult1)
+        assertNull(store.chunks.single().ackedAt)
+        assertEquals(AckKind.RESULT, run.engine.snapshot().lastAckKind)
+        assertEquals(CommandResult.FAILURE, run.engine.snapshot().lastAckResult)
+        run.engine.onDisconnect()
+        val again = run(store, script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        assertEquals(SessionOutcome.COMPLETE, again.engine.outcome)
+        assertEquals(PHONE, store.chunks.single().ackedAt)
+        assertEquals(1, again.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun resultZeroDoesNotClearAnEarlierResult() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val chunk = listOf(ScriptChunk(token, listOf(sampleRecord())))
+        val first = run(store, script(chunks = chunk))
+        assertEquals(PHONE, store.chunks.single().ackedAt)
+        val second = run(store, script(chunks = chunk, ackResult = CommandResult.FAILURE))
+        assertTrue(second.engine.isActive)
+        assertEquals(1, second.engine.snapshot().ackResult0)
+        assertEquals(PHONE, store.chunks.single().ackedAt)
+        assertEquals(1, second.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(SessionOutcome.COMPLETE, first.engine.outcome)
+    }
+
+    @Test
+    fun silenceIsNotMarkedAndTheNextAttemptMayTryOnce() {
+        val clock = ManualMillis()
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val run = run(
+            store,
+            script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord()))), ackResult = null),
+            clock = clock,
+        )
+        assertTrue(run.engine.isActive)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(AckKind.HANDED_OFF, run.engine.snapshot().lastAckKind)
+        clock.value = HistoryLimits.WATCHDOG_MS
+        assertTrue(run.engine.onWatchdog())
+        assertEquals(1, run.engine.snapshot().ackUnanswered)
+        assertEquals(AckKind.NO_RESPONSE, run.engine.snapshot().lastAckKind)
+        assertNull(store.chunks.single().ackedAt)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        val again = run(store, script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        assertEquals(PHONE, store.chunks.single().ackedAt)
+    }
+
+    @Test
+    fun pendingStaysOpenAndATimeoutDoesNotMark() {
+        val clock = ManualMillis()
+        val store = MemorySyncStore()
+        val run = run(
+            store,
+            script(ackResult = CommandResult.PENDING),
+            clock = clock,
+        )
+        assertEquals(1, run.engine.snapshot().ackPending)
+        assertNull(store.chunks.single().ackedAt)
+        clock.value = HistoryLimits.WATCHDOG_MS
+        assertTrue(run.engine.onWatchdog())
+        assertEquals(0, run.engine.snapshot().ackPending)
+        assertEquals(1, run.engine.snapshot().ackUnanswered)
+        assertNull(store.chunks.single().ackedAt)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun aRefusedWriteDoesNotMarkAndDoesNotFinishTheAttempt() {
+        val store = MemorySyncStore()
+        val token = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val written = mutableListOf<ByteArray>()
+        val outbox = ArrayDeque<ByteArray>()
+        val engine = engine(store, ManualMillis(), written, ackEnabled = { true }) { frame ->
+            val decoded = FrameCodec.decode(frame)
+            val ack = decoded is DecodeResult.Ok && decoded.frame.command == HistoryAckCommand.NUMBER
+            if (!ack) outbox += frame
+            !ack
+        }
+        val strap = FakeStrap(script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        engine.start()
+        var steps = 0
+        while (engine.isActive && steps < 30_000) {
+            steps += 1
+            if (outbox.isNotEmpty()) {
+                strap.accept(outbox.removeFirst())
+                continue
+            }
+            val incoming = strap.poll() ?: break
+            engine.onNotification("notify", incoming)
+        }
+        assertTrue(steps < 30_000)
+        assertTrue(engine.isActive)
+        assertEquals(1, engine.snapshot().ackRadioRefused)
+        assertEquals(0, engine.events.filterIsInstance<SyncTrace.Ack>().size)
+        assertNull(store.chunks.single().ackedAt)
+        assertNull(engine.outcome)
+        assertEquals(1, written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun aMissingReadBackDoesNotSend() {
+        val store = MemorySyncStore().also { it.hidePersistedAfter = 0 }
+        val run = run(store, script())
+        assertTrue(run.engine.isActive)
+        assertEquals(1, store.chunks.size)
+        assertNull(store.chunks.single().ackedAt)
+        assertEquals(1, run.engine.snapshot().ackSkipped)
+        assertTrue(run.engine.snapshot().ackNote!!.contains("read back"))
+        assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun aMarkFailureAfterResultOneDoesNotWriteAgain() {
+        val store = MemorySyncStore().also { it.failMark = true }
+        val run = run(store, script())
+        assertEquals(SessionOutcome.COMPLETE, run.engine.outcome)
+        assertEquals(1, run.engine.snapshot().ackResult1)
+        assertNull(store.chunks.single().ackedAt)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun theWrongFirmwareAndTheOffSwitchSaveWithoutSending() {
+        val wrong = run(MemorySyncStore(), script(), firmware = { "50.42.1.0" })
+        assertTrue(wrong.engine.isActive)
+        assertEquals(1, wrong.store.chunks.size)
+        assertNull(wrong.store.chunks.single().ackedAt)
+        assertTrue(wrong.engine.snapshot().ackNote!!.contains(HistoryAckFirmware.ALLOWED))
+        assertTrue(wrong.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+
+        val off = run(MemorySyncStore(), script(), ackEnabled = { false })
+        assertTrue(off.engine.isActive)
+        assertNull(off.store.chunks.single().ackedAt)
+        assertTrue(off.engine.snapshot().ackNote!!.contains("off"))
+        assertTrue(off.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
+    fun aSpecialControlWordIsStoredAndNotAcknowledged() {
+        val token = sampleToken()
+        val run = run(MemorySyncStore(), script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))
+        assertTrue(run.engine.isActive)
+        assertArrayEquals(token, run.store.chunks.single().token)
+        assertNull(run.store.chunks.single().ackedAt)
+        assertEquals(1, run.engine.snapshot().ackSkipped)
+        assertTrue(run.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertFalse(HistoryAckGate.maySend())
+    }
+
+    @Test
+    fun turningTheSwitchOffStopsTheNextChunkOnly() {
+        var enabled = true
+        val first = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val second = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val run = run(
+            MemorySyncStore(),
+            script(
+                chunks = listOf(
+                    ScriptChunk(first, listOf(sampleRecord(recordIndex = 1))),
+                    ScriptChunk(second, listOf(sampleRecord(recordIndex = 2))),
+                ),
+            ),
+            ackEnabled = { enabled },
+            onProgress = { snap -> if (snap.ackSent == 1) enabled = false },
+        )
+        assertTrue(run.engine.isActive)
+        assertEquals(2, run.store.chunks.size)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertEquals(PHONE, run.store.chunks[0].ackedAt)
+        assertNull(run.store.chunks[1].ackedAt)
+        assertTrue(run.engine.snapshot().ackNote!!.contains("off"))
+    }
+
+    @Test
+    fun disconnectDropsTheOpenChunkAndLeavesTheCommittedOne() {
+        val store = MemorySyncStore()
+        val kept = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        val open = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val run = run(store, script(stream = StreamKind.SILENT))
+        run.engine.onNotification("notify", metadata(HistoryMetadata.START, null))
+        run.engine.onNotification("notify", sampleRecord(recordIndex = 1))
+        run.engine.onNotification("notify", metadata(HistoryMetadata.END, kept))
+        run.engine.onNotification("notify", metadata(HistoryMetadata.START, null))
+        run.engine.onNotification("notify", sampleRecord(recordIndex = 2))
+        assertEquals(1, store.chunks.size)
+        run.engine.onDisconnect()
+        assertEquals(SessionOutcome.DISCONNECTED, run.engine.outcome)
+        assertEquals(1, store.chunks.size)
+        assertTrue(run.engine.snapshot().droppedUncommitted)
+        assertEquals(1, run.written.count { commandOf(it) == HistoryAckCommand.NUMBER })
+        assertArrayEquals(kept, store.chunks.single().token)
+        assertFalse(store.chunks.any { it.token.contentEquals(open) })
+    }
+
+    @Test
     fun phoneTicksFollowTheHundredthsRule() {
         assertEquals(PhoneTime(1_700_000_000L, 0), phoneTimeFromUnixMillis(1_700_000_000_000L))
         assertEquals(PhoneTime(1, 16_384), phoneTimeFromUnixMillis(1_500))
@@ -435,9 +802,10 @@ class HistorySyncEngineTest {
         range: ByteArray = ByteArray(DataRangeCommand.BODY_BYTES) { index -> if (index == 0) 1 else 0x22 },
         startResults: List<Int> = listOf(CommandResult.SUCCESS),
         startState: Int = 1,
-        chunks: List<ScriptChunk> = listOf(ScriptChunk(sampleToken(), listOf(sampleRecord()))),
+        chunks: List<ScriptChunk> = listOf(ScriptChunk(byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2), listOf(sampleRecord()))),
         stream: StreamKind = StreamKind.CHUNKS,
         floodCount: Int = HistoryLimits.MAX_RECORDS_WITHOUT_END,
+        ackResult: Int? = CommandResult.SUCCESS,
     ): StrapScript = StrapScript(
         strapUnixSeconds = strapUnixSeconds,
         strapTicks = 100,
@@ -447,9 +815,33 @@ class HistorySyncEngineTest {
         chunks = chunks,
         stream = stream,
         floodCount = floodCount,
+        ackResult = ackResult,
     )
 
     private fun emptyChunk(): ScriptChunk = ScriptChunk(byteArrayOf(4, 4, 4, 4, 4, 4, 4, 4), emptyList())
+
+    private fun metadata(kind: Int, token: ByteArray?): ByteArray {
+        val body = ByteArray(18)
+        if (token != null) token.copyInto(body, destinationOffset = 10)
+        return FrameCodec.encode(
+            headerWord = HeaderWord.COMMON_RESPONSE,
+            packetType = PacketType.HISTORY_METADATA,
+            sequence = 1,
+            command = kind,
+            body = body,
+        )
+    }
+
+    /** Kind 3 with no token bytes, the short complete shape. */
+    private fun shortComplete(): ByteArray {
+        return FrameCodec.encode(
+            headerWord = HeaderWord.COMMON_RESPONSE,
+            packetType = PacketType.HISTORY_METADATA,
+            sequence = 2,
+            command = HistoryMetadata.COMPLETE,
+            body = ByteArray(9),
+        )
+    }
 
     private fun run(
         store: MemorySyncStore,
@@ -457,11 +849,12 @@ class HistorySyncEngineTest {
         clock: ManualMillis = ManualMillis(),
         ackEnabled: () -> Boolean = { true },
         onProgress: (SyncSnapshot) -> Unit = {},
+        firmware: () -> String? = { HistoryAckFirmware.ALLOWED },
     ): Attempt {
         val strap = FakeStrap(script)
         val written = mutableListOf<ByteArray>()
         val outbox = ArrayDeque<ByteArray>()
-        val engine = engine(store, clock, written, ackEnabled, onProgress) { frame ->
+        val engine = engine(store, clock, written, ackEnabled, onProgress, firmware) { frame ->
             outbox += frame
             true
         }
@@ -489,12 +882,41 @@ class HistorySyncEngineTest {
         return Attempt(engine, store, strap, written)
     }
 
+    private fun pump(
+        engine: HistorySyncEngine,
+        written: MutableList<ByteArray>,
+        script: StrapScript,
+    ): HistorySyncEngine {
+        val strap = FakeStrap(script)
+        engine.start()
+        var accepted = 0
+        var steps = 0
+        while (engine.isActive && steps < 30_000) {
+            steps += 1
+            if (accepted < written.size) {
+                val frame = written[accepted]
+                accepted += 1
+                if (strap.connected) strap.accept(frame)
+                continue
+            }
+            val incoming = strap.poll()
+            if (incoming != null) {
+                engine.onNotification("notify", incoming)
+                continue
+            }
+            break
+        }
+        assertTrue(steps < 30_000)
+        return engine
+    }
+
     private fun engine(
         store: MemorySyncStore,
         clock: ManualMillis,
         written: MutableList<ByteArray>,
         ackEnabled: () -> Boolean,
         onProgress: (SyncSnapshot) -> Unit = {},
+        firmware: () -> String? = { HistoryAckFirmware.ALLOWED },
         transmit: (ByteArray) -> Boolean = { true },
     ): HistorySyncEngine {
         return HistorySyncEngine(
@@ -505,7 +927,8 @@ class HistorySyncEngineTest {
                 written += frame.copyOf()
                 transmit(frame)
             },
-            ackEnabled = ackEnabled,
+            historyAckEnabled = ackEnabled,
+            firmware = firmware,
             nowMs = { clock.value },
             onProgress = onProgress,
         )

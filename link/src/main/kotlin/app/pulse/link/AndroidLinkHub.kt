@@ -221,10 +221,13 @@ internal class AndroidLinkHub(
         val generation = ++feedGeneration
         heartRateJob?.cancel()
         heartRateJob = scope.launch {
-            created.heartRate.collect { sample ->
-                if (generation == feedGeneration) {
-                    heartRate.publish(sample)
+            launch {
+                created.heartRateChannel.collect { channel ->
+                    if (generation == feedGeneration) heartRate.applyChannel(channel)
                 }
+            }
+            created.heartRate.collect { sample ->
+                if (generation == feedGeneration) heartRate.publish(sample)
             }
         }
     }
