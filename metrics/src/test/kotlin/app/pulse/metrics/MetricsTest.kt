@@ -262,6 +262,73 @@ class MetricsTest {
         assertTrue(text.contains("Recovery: ${"%.4f".format(java.util.Locale.US, expected)}"))
     }
 
+    @Test
+    fun edgeSecondsBesideStrapAreNotCountedTwice() {
+        val zone = ZoneOffset.UTC
+        val night = LocalDate.of(2026, 11, 8).atStartOfDay(zone).toEpochSecond() + 3600
+        val day = night + 11 * 3600
+        val strapNight = sleepRun(night, 1200, source = SOURCE_STRAP)
+        val strapDay = (0 until 600).map { index ->
+            second(day + index, 1, hr = 140, motion = 0, activity = 1, steps = index, source = SOURCE_STRAP)
+        }
+        val edgeShifted = (0 until 600).map { index ->
+            second(
+                day + 1 + index,
+                0,
+                hr = 140,
+                motion = 0,
+                activity = 1,
+                steps = index * 3,
+                source = SOURCE_EDGE,
+            )
+        }
+        val strapOnly = computeDays(strapNight + strapDay, zone).days.single()
+        val mixed = computeDays(strapNight + strapDay + edgeShifted, zone).days.single()
+        val strapStrain = strapOnly.strain!!
+        val mixedStrain = mixed.strain!!
+        assertEquals(strapStrain.seconds, mixedStrain.seconds)
+        assertEquals(strapStrain.trimp!!, mixedStrain.trimp!!, 0.001)
+        assertEquals(strapOnly.stepIncrease, mixed.stepIncrease)
+        assertEquals(0L, mixed.edgeStepIncrease)
+        assertEquals(599L, mixed.stepIncrease)
+        assertTrue(mixedStrain.trimp!! < strapStrain.trimp!! * 1.05 + 1.0)
+    }
+
+    @Test
+    fun stepDeltasDoNotJumpAcrossTheOtherSource() {
+        val start = LocalDate.of(2026, 11, 8).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val edgeBefore = second(start, 1, hr = 70, steps = 100, source = SOURCE_EDGE, motion = 0)
+        val edgeAfter = second(start + 100, 1, hr = 70, steps = 900, source = SOURCE_EDGE, motion = 0)
+        val strap = listOf(
+            second(start + 40, 1, hr = 100, steps = 0, source = SOURCE_STRAP, motion = 0),
+            second(start + 41, 2, hr = 100, steps = 25, source = SOURCE_STRAP, motion = 0),
+        )
+        val day = computeDays(listOf(edgeBefore, edgeAfter) + strap, ZoneOffset.UTC).days.single()
+        assertEquals(25L, day.stepIncrease)
+        assertEquals(0L, day.edgeStepIncrease)
+        assertEquals(2, day.strapSeconds)
+        assertEquals(2, day.edgeSeconds)
+    }
+
+    @Test
+    fun aDayWithNoSecondsIsLabeledNoData() {
+        val note = EdgeDayNote("2026-11-03", 1, 40.0, 30.0, 10.0)
+        val day = computeDays(emptyList(), ZoneOffset.UTC, edgeScores = listOf(note)).days.single()
+        assertEquals(0, day.strapSeconds)
+        assertEquals(0, day.edgeSeconds)
+        assertTrue(dayBookText(computeDays(emptyList(), ZoneOffset.UTC, edgeScores = listOf(note))).contains("Source: no data"))
+    }
+
+    @Test
+    fun strainDialApproaches21WithoutReachingItOnAModerateDay() {
+        assertEquals(0.0, approximateStrain21(0.0), 0.0001)
+        val moderate = approximateStrain21(DayRules.STRAIN_DIAL_TRIMP)
+        assertEquals(21.0 * (1.0 - kotlin.math.exp(-1.0)), moderate, 0.0001)
+        assertTrue(moderate in 13.0..14.0)
+        assertTrue(approximateStrain21(10_000.0) <= 21.0)
+        assertTrue(approximateStrain21(10_000.0) > moderate)
+    }
+
     private fun sourceName(day: DayResult): String = when {
         day.strapSeconds > 0 && day.edgeSeconds > 0 -> "mixed"
         day.edgeSeconds > 0 -> "Edge import"

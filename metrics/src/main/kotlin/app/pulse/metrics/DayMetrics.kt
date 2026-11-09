@@ -51,6 +51,21 @@ object DayRules {
     const val STEP_WRAP_MAX: Int = 5_000
     const val GAP_SECONDS: Long = 60
 
+    /**
+     * Edge seconds this close to a strap second are the same moment with a
+     * different timestamp alignment, not a gap the strap failed to cover.
+     */
+    const val STRAP_ALIGN_SECONDS: Long = 1
+
+    /**
+     * Banister TRIMP that maps to about 13 on the approximate 0–21 dial.
+     * It is a display scale, not a measured maximum.
+     */
+    const val STRAIN_DIAL_TRIMP: Double = 180.0
+
+    /** Reference used only to draw the sleep dial. Not a personal sleep need. */
+    const val SLEEP_REFERENCE_SECONDS: Int = 8 * 60 * 60
+
     /** Banister 1991 male coefficients. Sex is not stored, so every second uses these. */
     const val BANISTER_A: Double = 0.64
     const val BANISTER_B: Double = 1.92
@@ -181,7 +196,7 @@ fun computeDays(
     edgeWindows: List<EdgeSleepWindow> = emptyList(),
     edgeScores: List<EdgeDayNote> = emptyList(),
 ): DayBook {
-    val samples = labelEdgeWindows(dedupe(records), edgeWindows)
+    val samples = labelEdgeWindows(dedupe(dropEdgeBesideStrap(records)), edgeWindows)
     val scoreDates = edgeScores.mapNotNull { scoreDate(it.dayId) }
     if (samples.isEmpty() && scoreDates.isEmpty()) {
         return DayBook(zone.id, emptyList(), "No layout-18 or Edge one-second rows are stored.")
@@ -217,7 +232,9 @@ fun dayBookText(book: DayBook): String = buildString {
 private const val METHOD: String =
     "Approximate day metrics from stored layout-18 seconds and Edge import seconds. Not WHOOP scores.\n" +
         "A strap second wins over an Edge second at the same Unix time. " +
-        "Edge one-second rows fill only the seconds the strap does not have.\n" +
+        "An Edge second within 1 s of a strap second is dropped so a shifted timestamp " +
+        "is not counted twice. Edge rows fill only seconds the strap does not cover. " +
+        "Step increases stay inside one source and do not jump across the other source.\n" +
         "Sleep uses band-motion SLEEP when that value is stored (strap frame byte 81 bits 4-5, " +
         "or Edge band_sleep_state 0 WAKE, 1 STILL, 2 SLEEP, 3 UP). It is not light, deep, or REM. " +
         "Where Edge seconds have no band-motion value, an Edge onset/offset labels those seconds. " +
@@ -549,7 +566,37 @@ private fun sleepDetection(samples: List<SecondRecord>): String {
 private fun sourceLabel(strapSeconds: Int, edgeSeconds: Int): String = when {
     strapSeconds > 0 && edgeSeconds > 0 -> "mixed"
     edgeSeconds > 0 -> "Edge import"
-    else -> "strap"
+    strapSeconds > 0 -> "strap"
+    else -> "no data"
+}
+
+internal fun dropEdgeBesideStrap(
+    records: List<SecondRecord>,
+    alignSeconds: Long = DayRules.STRAP_ALIGN_SECONDS,
+): List<SecondRecord> {
+    val strap = records.asSequence().filter { it.source == SOURCE_STRAP }.map { it.unixSeconds }.toHashSet()
+    if (strap.isEmpty()) return records
+    val covered = HashSet<Long>(strap.size * 3)
+    for (second in strap) {
+        var offset = -alignSeconds
+        while (offset <= alignSeconds) {
+            covered += second + offset
+            offset += 1
+        }
+    }
+    return records.filter { it.source != SOURCE_EDGE || it.unixSeconds !in covered }
+}
+
+/**
+ * Display-only map from Banister TRIMP onto a 0–21 dial.
+ *
+ * `21 * (1 - exp(-trimp / 180))`. Zero TRIMP is 0. The curve approaches 21
+ * and never claims a proprietary strain score. 180 is [DayRules.STRAIN_DIAL_TRIMP].
+ */
+fun approximateStrain21(trimp: Double): Double {
+    if (trimp <= 0.0) return 0.0
+    val scaled = 21.0 * (1.0 - exp(-trimp / DayRules.STRAIN_DIAL_TRIMP))
+    return scaled.coerceIn(0.0, 21.0)
 }
 
 private fun spanOf(samples: List<SecondRecord>): Span? {

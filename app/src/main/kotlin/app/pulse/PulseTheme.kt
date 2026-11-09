@@ -1,19 +1,21 @@
 package app.pulse
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import app.pulse.feature.home.PulsePalette
 
-private val PulseColors = lightColorScheme(
-    primary = Color(0xFF0F6E6E),
-    onPrimary = Color(0xFFFFFCF8),
-    secondary = Color(0xFFB6403A),
-    onSecondary = Color(0xFFFFFCF8),
-    background = Color(0xFFF6F4EF),
-    onBackground = Color(0xFF1C1B19),
-    surface = Color(0xFFFFFCF8),
-    onSurface = Color(0xFF1C1B19),
+private val PulseColors = darkColorScheme(
+    primary = PulsePalette.green,
+    onPrimary = Color(0xFF06210F),
+    secondary = PulsePalette.blue,
+    onSecondary = Color(0xFF041428),
+    background = PulsePalette.background,
+    onBackground = PulsePalette.text,
+    surface = PulsePalette.surface,
+    onSurface = PulsePalette.text,
+    surfaceContainer = PulsePalette.surface,
 )
 
 @Composable

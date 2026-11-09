@@ -32,13 +32,23 @@ data class R18MetricRow(
 )
 
 /**
- * Per-day text for the latest stored strap.
+ * One read of the day book plus the strap facts the home screen shows beside it.
  *
- * The text names the time zone and the formulas. It does not include the
- * device address, history tokens, or raw record bytes.
+ * [batteryPercent] prefers the standard battery service, then command 26.
+ * [lastSyncUnixSeconds] is the newest history session's end, or its start
+ * when the session is still open. Neither field starts a strap command.
  */
+data class DaySnapshot(
+    val book: DayBook,
+    val batteryPercent: Int?,
+    val lastSyncUnixSeconds: Long?,
+)
+
 interface DayMetricsSource {
     fun report(zone: ZoneId = ZoneId.systemDefault()): String
+
+    fun snapshot(zone: ZoneId = ZoneId.systemDefault()): DaySnapshot =
+        DaySnapshot(DayBook(zone.id, emptyList(), null), null, null)
 }
 
 class RoomDayMetrics(
@@ -46,6 +56,14 @@ class RoomDayMetrics(
     private val devices: DeviceDirectory,
 ) : DayMetricsSource {
     override fun report(zone: ZoneId): String {
+        val loaded = read(zone)
+        if (loaded.failed) return "Day metrics could not be read.\n"
+        return dayBookText(loaded.snapshot.book)
+    }
+
+    override fun snapshot(zone: ZoneId): DaySnapshot = read(zone).snapshot
+
+    private fun read(zone: ZoneId): DayRead {
         return try {
             val device = devices.latest()
             val strap = if (device == null) {
@@ -60,15 +78,29 @@ class RoomDayMetrics(
                 sleep = imported.metricSleep(EDGE_IMPORT_SOURCE),
                 scores = imported.metricScores(EDGE_IMPORT_SOURCE),
             )
-            if (device == null && inputs.oneHz.isEmpty()) {
-                return metricsText(zone, null)
+            val book = if (device == null && inputs.oneHz.isEmpty()) {
+                DayBook(zone.id, emptyList(), "No device row is stored.")
+            } else {
+                val assembly = assembleDays(strap, inputs)
+                computeDays(assembly.records, zone, assembly.windows, assembly.notes)
             }
-            val assembly = assembleDays(strap, inputs)
-            dayBookText(computeDays(assembly.records, zone, assembly.windows, assembly.notes))
+            val sync = database.sessions().latestActivityUnixSeconds()
+            DayRead(DaySnapshot(book, batteryPercent(device), sync), failed = false)
         } catch (_: Exception) {
-            "Day metrics could not be read.\n"
+            DayRead(
+                DaySnapshot(DayBook(zone.id, emptyList(), "Day metrics could not be read."), null, null),
+                failed = true,
+            )
         }
     }
+}
+
+private data class DayRead(val snapshot: DaySnapshot, val failed: Boolean)
+
+private fun batteryPercent(device: DeviceRow?): Int? {
+    device ?: return null
+    device.serviceBatteryPercent?.let { return it }
+    return device.commandBatteryPercent?.toInt()
 }
 
 internal data class StoredDayInputs(

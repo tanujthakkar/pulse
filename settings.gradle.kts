@@ -28,6 +28,7 @@ include(
     ":feature:live",
     ":feature:sync",
     ":feature:day",
+    ":feature:home",
     ":feature:debug",
     ":feature:edgeimport",
     ":testing:fakestrap",

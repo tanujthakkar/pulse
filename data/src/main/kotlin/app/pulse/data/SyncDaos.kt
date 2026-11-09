@@ -17,6 +17,12 @@ interface SyncSessionDao {
     fun count(): Int
 
     @Query(
+        "SELECT COALESCE(ended_unix_seconds, started_unix_seconds) FROM sync_session " +
+            "ORDER BY id DESC LIMIT 1",
+    )
+    fun latestActivityUnixSeconds(): Long?
+
+    @Query(
         "UPDATE sync_session SET ended_unix_seconds = :endedUnixSeconds, " +
             "ended_subsecond_ticks = :endedSubsecondTicks WHERE id = :id",
     )
