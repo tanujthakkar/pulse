@@ -59,6 +59,7 @@ fun DebugScreen(
     onPause: () -> Unit,
     onExport: () -> Unit,
     onFilter: (FrameFilter) -> Unit,
+    onOpenImport: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -88,6 +89,14 @@ fun DebugScreen(
                     Button(onClick = onExport, modifier = Modifier.testTag("debug_export")) {
                         Text("Export")
                     }
+                }
+                Button(
+                    onClick = onOpenImport,
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .testTag("debug_import"),
+                ) {
+                    Text("Import Edge backup")
                 }
                 Text(
                     text = "Recording",

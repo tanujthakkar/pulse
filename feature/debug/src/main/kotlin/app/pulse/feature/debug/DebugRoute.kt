@@ -11,7 +11,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
-fun DebugRoute(viewModel: DebugViewModel = hiltViewModel()) {
+fun DebugRoute(
+    viewModel: DebugViewModel = hiltViewModel(),
+    onOpenImport: () -> Unit = {},
+) {
     val context = LocalContext.current
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
@@ -37,6 +40,7 @@ fun DebugRoute(viewModel: DebugViewModel = hiltViewModel()) {
         onPause = { viewModel.setPaused(!paused) },
         onExport = { exportLauncher.launch("pulse-frames.txt") },
         onFilter = viewModel::setFilter,
+        onOpenImport = onOpenImport,
     )
 }
 

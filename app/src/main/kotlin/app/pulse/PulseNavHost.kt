@@ -16,6 +16,7 @@ import androidx.navigation.compose.rememberNavController
 import app.pulse.feature.connect.ConnectRoute
 import app.pulse.feature.day.DayRoute
 import app.pulse.feature.debug.DebugRoute
+import app.pulse.feature.edgeimport.EdgeImportRoute
 import app.pulse.feature.live.LiveRoute
 import app.pulse.feature.sync.SyncRoute
 
@@ -56,7 +57,12 @@ fun PulseNavHost() {
             composable(PulseRoute.Live.route) { LiveRoute() }
             composable(PulseRoute.Sync.route) { SyncRoute() }
             composable(PulseRoute.Days.route) { DayRoute() }
-            composable(PulseRoute.Debug.route) { DebugRoute() }
+            composable(PulseRoute.Debug.route) {
+                DebugRoute(onOpenImport = { navController.navigate(IMPORT_ROUTE) })
+            }
+            composable(IMPORT_ROUTE) {
+                EdgeImportRoute(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

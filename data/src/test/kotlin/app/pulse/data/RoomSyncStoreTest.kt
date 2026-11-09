@@ -338,6 +338,7 @@ class DeviceSchemaMigrationTest {
                 PulseMigrations.FROM_1_TO_2,
                 PulseMigrations.FROM_2_TO_3,
                 PulseMigrations.FROM_3_TO_4,
+                PulseMigrations.FROM_4_TO_5,
             )
             .allowMainThreadQueries()
             .build()
@@ -396,7 +397,11 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V2)
-            .addMigrations(PulseMigrations.FROM_2_TO_3, PulseMigrations.FROM_3_TO_4)
+            .addMigrations(
+                PulseMigrations.FROM_2_TO_3,
+                PulseMigrations.FROM_3_TO_4,
+                PulseMigrations.FROM_4_TO_5,
+            )
             .allowMainThreadQueries()
             .build()
         val sample = room.samples().find("AA:BB:CC:DD:EE:FF", 3, 100)
@@ -444,7 +449,7 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V3)
-            .addMigrations(PulseMigrations.FROM_3_TO_4)
+            .addMigrations(PulseMigrations.FROM_3_TO_4, PulseMigrations.FROM_4_TO_5)
             .allowMainThreadQueries()
             .build()
         val session = room.sessions().find(1)

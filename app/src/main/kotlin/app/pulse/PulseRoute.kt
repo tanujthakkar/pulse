@@ -13,3 +13,6 @@ enum class PulseRoute(val route: String, val label: String) {
     val mark: String
         get() = if (this == Days) "Dy" else label.take(1)
 }
+
+/** Import is opened from Debug. It is not a bottom-bar destination. */
+const val IMPORT_ROUTE: String = "import"

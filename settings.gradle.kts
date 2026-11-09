@@ -29,6 +29,7 @@ include(
     ":feature:sync",
     ":feature:day",
     ":feature:debug",
+    ":feature:edgeimport",
     ":testing:fakestrap",
     ":testing:golden",
 )

@@ -47,6 +47,7 @@ dependencies {
     implementation(project(":feature:sync"))
     implementation(project(":feature:day"))
     implementation(project(":feature:debug"))
+    implementation(project(":feature:edgeimport"))
     implementation(project(":link"))
     implementation(project(":data"))
 

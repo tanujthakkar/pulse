@@ -24,6 +24,7 @@ object DataBindings {
                 PulseMigrations.FROM_1_TO_2,
                 PulseMigrations.FROM_2_TO_3,
                 PulseMigrations.FROM_3_TO_4,
+                PulseMigrations.FROM_4_TO_5,
             )
             .allowMainThreadQueries()
             .build()
@@ -43,4 +44,8 @@ object DataBindings {
     @Singleton
     fun dayMetricsSource(database: PulseDatabase, devices: DeviceDirectory): DayMetricsSource =
         RoomDayMetrics(database, devices)
+
+    @Provides
+    @Singleton
+    fun edgeImporter(database: PulseDatabase): EdgeImporter = EdgeImporter(database)
 }

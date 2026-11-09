@@ -41,8 +41,22 @@ interface DeviceDao {
         RawFrameRow::class,
         R18SampleRow::class,
         DeviceBatteryRow::class,
+        EdgeImportBatchRow::class,
+        EdgeOneHzRow::class,
+        EdgeRrRow::class,
+        EdgeWorkoutRow::class,
+        EdgeWorkoutPointRow::class,
+        EdgeWorkoutSplitRow::class,
+        EdgeStrengthSetRow::class,
+        EdgeSleepRow::class,
+        EdgeDayScoreRow::class,
+        EdgeMetricSeriesRow::class,
+        EdgeMetricMethodRow::class,
+        EdgeMetricVersionRow::class,
+        EdgeWakeFeaturesRow::class,
+        EdgeSubstrateArchiveRow::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -52,6 +66,7 @@ abstract class PulseDatabase : RoomDatabase() {
     abstract fun frames(): RawFrameDao
     abstract fun samples(): R18SampleDao
     abstract fun batteries(): DeviceBatteryDao
+    abstract fun edgeImport(): EdgeImportDao
 }
 
 interface DeviceDirectory {

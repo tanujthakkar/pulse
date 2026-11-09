@@ -8,11 +8,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *
  * Version 1 is the device row only. Version 2 adds the sync tables. Version 3
  * adds `r18_sample.decoder_version`. Version 4 adds
- * `sync_session.range_snapshot`, the 65-byte data-range body. The device table
- * is not rewritten. Existing layout-18 rows gain decoder version 0, meaning
- * they were stored before a decoder stamped them. New commits write the
- * decoder's own version. Sessions opened before version 4 keep a null
- * snapshot; that is not a captured range.
+ * `sync_session.range_snapshot`, the 65-byte data-range body. Version 5 adds
+ * the Edge import tables. The device table is not rewritten. Existing
+ * layout-18 rows gain decoder version 0, meaning they were stored before a
+ * decoder stamped them. New commits write the decoder's own version. Sessions
+ * opened before version 4 keep a null snapshot; that is not a captured range.
+ * Version 5 does not rewrite strap rows. Imported Edge rows live in the new
+ * tables, each labeled `source` = `edge_import`.
  */
 object PulseMigrations {
     val FROM_1_TO_2: Migration = object : Migration(1, 2) {
@@ -34,7 +36,88 @@ object PulseMigrations {
             db.execSQL("ALTER TABLE `sync_session` ADD COLUMN `range_snapshot` BLOB")
         }
     }
+
+    val FROM_4_TO_5: Migration = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            EDGE_IMPORT_TABLES.forEach { sql -> db.execSQL(sql) }
+        }
+    }
 }
+
+private val EDGE_IMPORT_TABLES: List<String> = listOf(
+    "CREATE TABLE IF NOT EXISTS `edge_import_batch` (`id` TEXT NOT NULL, " +
+        "`created_at_ms` INTEGER NOT NULL, `source` TEXT NOT NULL, `user_version` INTEGER NOT NULL, " +
+        "`byte_size` INTEGER NOT NULL, `sha256` TEXT NOT NULL, `inserted_rows` INTEGER NOT NULL, " +
+        "`already_present` INTEGER NOT NULL, `skipped_strap_overlap` INTEGER NOT NULL, " +
+        "PRIMARY KEY(`id`))",
+    "CREATE TABLE IF NOT EXISTS `edge_onehz` (`device_id` TEXT NOT NULL, `ts_ms` INTEGER NOT NULL, " +
+        "`rec_ts` INTEGER, `counter` INTEGER, `hr` INTEGER, `ax` REAL, `ay` REAL, `az` REAL, " +
+        "`spo2_red_raw` INTEGER, `spo2_ir_raw` INTEGER, `skin_temp_raw` INTEGER, " +
+        "`step_count` INTEGER, `step_cadence` INTEGER, `activity_class` INTEGER, " +
+        "`skin_temp_c` REAL, `on_wrist` INTEGER, `hr_valid` INTEGER, `hr_alt` INTEGER, " +
+        "`ambient_raw` INTEGER, `device_family` TEXT, `edge_source` TEXT, `temp_ch2_c` REAL, " +
+        "`temp_ch3_c` REAL, `signal_quality_logvar` REAL, `dyn_accel_g` REAL, `ts_subsec` INTEGER, " +
+        "`band_sleep_state` INTEGER, `record_kind` TEXT NOT NULL, `import_batch_id` TEXT NOT NULL, " +
+        "`source` TEXT NOT NULL, PRIMARY KEY(`device_id`, `ts_ms`))",
+    "CREATE INDEX IF NOT EXISTS `index_edge_onehz_ts_ms` ON `edge_onehz` (`ts_ms`)",
+    "CREATE TABLE IF NOT EXISTS `edge_rr` (`device_id` TEXT NOT NULL, `ts_ms` INTEGER NOT NULL, " +
+        "`rec_ts` INTEGER NOT NULL, `beat_index` INTEGER NOT NULL, `rr_ts_ms` INTEGER NOT NULL, " +
+        "`rr_ms` INTEGER NOT NULL, `device_family` TEXT, `edge_source` TEXT, `beat_ts_ms` INTEGER, " +
+        "`import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`device_id`, `ts_ms`, `beat_index`))",
+    "CREATE TABLE IF NOT EXISTS `edge_workout` (`id` TEXT NOT NULL, `start_ts` INTEGER NOT NULL, " +
+        "`end_ts` INTEGER, `type` TEXT NOT NULL, `status` TEXT NOT NULL, `calories` REAL, " +
+        "`strain` REAL, `max_hr` INTEGER, `duration_min` INTEGER, `zone_min_json` TEXT, " +
+        "`steps` INTEGER, `cadence_spm` INTEGER, `hrr_bpm` REAL, `edge_source` TEXT NOT NULL, " +
+        "`private` INTEGER NOT NULL, `device_family` TEXT, `trace_json` TEXT, " +
+        "`trace_samples` INTEGER, `rpe` REAL, `created_at` INTEGER NOT NULL, `avg_hr` INTEGER, " +
+        "`vo2max_estimate` REAL, `end_ts_fabricated` INTEGER NOT NULL, " +
+        "`import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, PRIMARY KEY(`id`))",
+    "CREATE TABLE IF NOT EXISTS `edge_workout_point` (`session_id` TEXT NOT NULL, " +
+        "`seq` INTEGER NOT NULL, `ts_ms` INTEGER NOT NULL, `lat` REAL NOT NULL, `lng` REAL NOT NULL, " +
+        "`alt` REAL, `accuracy` REAL, `speed` REAL, `import_batch_id` TEXT NOT NULL, " +
+        "`source` TEXT NOT NULL, PRIMARY KEY(`session_id`, `seq`))",
+    "CREATE TABLE IF NOT EXISTS `edge_workout_split` (`session_id` TEXT NOT NULL, " +
+        "`km` INTEGER NOT NULL, `meters` REAL NOT NULL, `duration_sec` INTEGER NOT NULL, " +
+        "`avg_hr` REAL, `net_elev_m` REAL, `import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`session_id`, `km`))",
+    "CREATE TABLE IF NOT EXISTS `edge_strength_set` (`session_id` TEXT NOT NULL, " +
+        "`seq` INTEGER NOT NULL, `exercise_key` TEXT NOT NULL, `set_index` INTEGER NOT NULL, " +
+        "`reps` INTEGER, `load_kg` REAL, `rpe` INTEGER, `hold_sec` INTEGER, `rest_sec` INTEGER, " +
+        "`at_ts` INTEGER, `note` TEXT NOT NULL, `import_batch_id` TEXT NOT NULL, " +
+        "`source` TEXT NOT NULL, PRIMARY KEY(`session_id`, `seq`))",
+    "CREATE TABLE IF NOT EXISTS `edge_sleep` (`day_id` TEXT NOT NULL, `algo_version` INTEGER NOT NULL, " +
+        "`payload_json` TEXT NOT NULL, `computed_at` INTEGER NOT NULL, `onset_ts` INTEGER, " +
+        "`offset_ts` INTEGER, `import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`day_id`, `algo_version`))",
+    "CREATE TABLE IF NOT EXISTS `edge_day_score` (`day_id` TEXT NOT NULL, " +
+        "`algo_version` INTEGER NOT NULL, `payload_json` TEXT NOT NULL, `window_json` TEXT NOT NULL, " +
+        "`computed_at` INTEGER NOT NULL, `finalized` INTEGER NOT NULL, `rhr` REAL, `rmssd` REAL, " +
+        "`readiness` REAL, `skipped` INTEGER NOT NULL, `partial` INTEGER NOT NULL, " +
+        "`import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`day_id`, `algo_version`))",
+    "CREATE TABLE IF NOT EXISTS `edge_metric_series` (`date` TEXT NOT NULL, `key` TEXT NOT NULL, " +
+        "`value` REAL, `import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`date`, `key`))",
+    "CREATE TABLE IF NOT EXISTS `edge_metric_method` (`date` TEXT NOT NULL, `key` TEXT NOT NULL, " +
+        "`method` TEXT NOT NULL, `family` TEXT NOT NULL, `class` TEXT NOT NULL, " +
+        "`import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, PRIMARY KEY(`date`, `key`))",
+    "CREATE TABLE IF NOT EXISTS `edge_metric_version` (`date` TEXT NOT NULL, " +
+        "`algo_version` INTEGER NOT NULL, `edge_source` TEXT, `device_family` TEXT, " +
+        "`coverage_devices` TEXT, `priority_hash` TEXT, `import_batch_id` TEXT NOT NULL, " +
+        "`source` TEXT NOT NULL, PRIMARY KEY(`date`))",
+    "CREATE TABLE IF NOT EXISTS `edge_wake_features` (`day_id` TEXT NOT NULL, " +
+        "`algo_version` INTEGER NOT NULL, `payload_json` TEXT NOT NULL, " +
+        "`computed_at` INTEGER NOT NULL, `import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`day_id`, `algo_version`))",
+    "CREATE TABLE IF NOT EXISTS `edge_substrate_archive` (`device_id` TEXT NOT NULL, " +
+        "`utc_day` INTEGER NOT NULL, `codec` INTEGER NOT NULL, `from_ts` INTEGER NOT NULL, " +
+        "`to_ts` INTEGER NOT NULL, `onehz_rows` INTEGER NOT NULL, `rr_rows` INTEGER NOT NULL, " +
+        "`raw_bytes` INTEGER NOT NULL, `fingerprint` INTEGER NOT NULL, `tz_offset_min` INTEGER, " +
+        "`blob` BLOB NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, " +
+        "`decoded` INTEGER NOT NULL, `import_batch_id` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+        "PRIMARY KEY(`device_id`, `utc_day`))",
+)
 
 private val STATEMENTS: List<String> = listOf(
     "CREATE TABLE IF NOT EXISTS `sync_session` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
