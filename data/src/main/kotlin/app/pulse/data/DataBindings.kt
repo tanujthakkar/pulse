@@ -38,4 +38,9 @@ object DataBindings {
 
     @Provides
     fun syncStore(store: RoomSyncStore): SyncStore = store
+
+    @Provides
+    @Singleton
+    fun dayMetricsSource(database: PulseDatabase, devices: DeviceDirectory): DayMetricsSource =
+        RoomDayMetrics(database, devices)
 }

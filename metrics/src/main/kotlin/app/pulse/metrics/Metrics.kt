@@ -1,9 +1,10 @@
 package app.pulse.metrics
 
 /**
- * Paper-cited metrics live here in a later milestone.
- * This module stays free of Android and storage types.
+ * Day metrics from stored layout-18 seconds.
+ *
+ * The scores are approximate published formulas. They are not WHOOP scores.
  */
 object Metrics {
-    const val IMPLEMENTED: Boolean = false
+    const val IMPLEMENTED: Boolean = true
 }

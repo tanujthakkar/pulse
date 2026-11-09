@@ -38,6 +38,7 @@ ksp {
 dependencies {
     implementation(project(":wire"))
     implementation(project(":sync"))
+    api(project(":metrics"))
     implementation(libs.androidx.room.runtime)
     implementation(libs.hilt.android)
     ksp(libs.androidx.room.compiler)

@@ -1,11 +1,221 @@
 package app.pulse.metrics
 
-import org.junit.jupiter.api.Assertions.assertFalse
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.ZoneId
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.exp
+import kotlin.math.ln
 
 class MetricsTest {
     @Test
-    fun noMetricIsImplementedInTheSkeleton() {
-        assertFalse(Metrics.IMPLEMENTED)
+    fun dayMetricsAreImplementedAsApproximateFormulas() {
+        assertTrue(Metrics.IMPLEMENTED)
+        val book = computeDays(emptyList(), ZoneOffset.UTC)
+        assertTrue(dayBookText(book).contains("Not WHOOP scores"))
+        assertTrue(dayBookText(book).contains("No layout-18 seconds"))
     }
+
+    @Test
+    fun coverageGapsAndTheLaterDuplicate() {
+        val day = LocalDate.of(2026, 1, 2).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val records = listOf(
+            second(day, 1, hr = null),
+            second(day, 2, hr = 60),
+            second(day + 1, 1, hr = 61, rr = listOf(1000)),
+            second(day + 2, 1, hr = 62),
+            second(day + 100, 1, hr = 70, activity = 1, steps = 10),
+        )
+        val result = computeDays(records, ZoneOffset.UTC).days.single()
+        assertEquals(4, result.storedSeconds)
+        assertEquals(4, result.heartSeconds)
+        assertEquals(1, result.acceptedRrSeconds)
+        assertEquals(1, result.anyRrSeconds)
+        assertEquals(97L, result.missingInsideSpan)
+        assertEquals(1, result.gapsAtLeastOneMinute)
+        assertEquals(97L, result.largestGapSeconds)
+        assertEquals(1, result.walkSeconds)
+        assertEquals(3, result.otherActivitySeconds)
+        assertTrue(dayBookText(computeDays(records, ZoneOffset.UTC)).contains("HR coverage 4 / 4"))
+    }
+
+    @Test
+    fun fiveMinutesBridgesAndTheNextSecondSplits() {
+        val start = LocalDate.of(2026, 1, 5).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val bridged = listOf(
+            second(start, 1, hr = 50, motion = DayRules.SLEEP),
+            second(start + 299, 1, hr = 50, motion = DayRules.SLEEP),
+        )
+        val split = listOf(
+            second(start, 1, hr = 50, motion = DayRules.SLEEP),
+            second(start + 300, 1, hr = 50, motion = DayRules.SLEEP),
+        )
+        assertEquals(1, computeDays(bridged, ZoneOffset.UTC).days.single().shortEpisodes)
+        assertEquals(2, computeDays(split, ZoneOffset.UTC).days.single().shortEpisodes)
+    }
+
+    @Test
+    fun overnightSleepBelongsToTheMorningItEnds() {
+        val zone = ZoneOffset.UTC
+        val evening = LocalDate.of(2026, 5, 1).atTime(23, 0).toEpochSecond(zone)
+        val book = computeDays(sleepRun(evening, 3 * 3600), zone)
+        val first = book.days.first { it.date == LocalDate.of(2026, 5, 1) }
+        val second = book.days.first { it.date == LocalDate.of(2026, 5, 2) }
+        assertNull(first.main)
+        assertEquals(3600, first.sleepSeconds)
+        assertEquals(10_800, second.main!!.sleepSeconds)
+        assertEquals(LocalDate.of(2026, 5, 2), second.main.endDate)
+    }
+
+    @Test
+    fun aNewYorkSpringForwardDayHas82800Seconds() {
+        val zone = ZoneId.of("America/New_York")
+        val start = LocalDate.of(2026, 3, 8).atStartOfDay(zone).toEpochSecond()
+        val day = computeDays(listOf(second(start, 1, hr = 60)), zone).days.single()
+        assertEquals(LocalDate.of(2026, 3, 8), day.date)
+        assertEquals(82_800L, day.daySeconds)
+    }
+
+    @Test
+    fun anEvenBaselineAveragesTheTwoMiddleDays() {
+        val zone = ZoneOffset.UTC
+        val first = LocalDate.of(2026, 6, 1)
+        val records = (0..4).flatMap { offset ->
+            val start = first.plusDays(offset.toLong()).atStartOfDay(zone).toEpochSecond() + 3600
+            val high = offset == 1 || offset == 2
+            sleepRun(start, 1200, hr = 50) { index ->
+                val other = if (high) 1200 else 1100
+                if (index % 2 == 0) 1000 else other
+            }
+        }
+        val last = computeDays(records, zone).days.first { it.date == first.plusDays(4) }
+        assertEquals(4, last.recovery!!.baselineDays)
+        assertEquals(150.0, last.recovery.baselineRmssd!!, 0.001)
+        val expected = 50.0 + 40.0 * ln(100.0 / 150.0)
+        assertEquals(expected, last.recovery.score!!, 0.001)
+    }
+
+    @Test
+    fun aShortWakeInsideSleepStaysOneEpisodeAndALongGapSplits() {
+        val start = LocalDate.of(2026, 1, 3).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val bridged = sleepRun(start, 1200) +
+            listOf(second(start + 1200, 1, hr = 70, motion = 0)) +
+            sleepRun(start + 1300, 100)
+        val book = computeDays(bridged, ZoneOffset.UTC)
+        assertEquals(1, book.days.single().episodes.size)
+        assertEquals(1300, book.days.single().main!!.sleepSeconds)
+
+        val split = sleepRun(start, 1200) + sleepRun(start + 1600, 100)
+        val splitDay = computeDays(split, ZoneOffset.UTC).days.single()
+        assertEquals(1, splitDay.episodes.size)
+        assertEquals(1, splitDay.shortEpisodes)
+        assertEquals(100, splitDay.shortSleepSeconds)
+        assertEquals(1200, splitDay.main!!.sleepSeconds)
+    }
+
+    @Test
+    fun rmssdUsesAcceptedPairsAndDropsALargeJump() {
+        val start = LocalDate.of(2026, 1, 4).atStartOfDay(ZoneOffset.UTC).toEpochSecond() + 3600
+        val steady = sleepRun(start, 1200)
+        val jumped = steady.mapIndexed { index, sample ->
+            if (index == 10) sample.copy(rrMillis = listOf(700)) else sample
+        }
+        val rhythm = computeDays(jumped, ZoneOffset.UTC).days.single().rhythm!!
+        assertEquals(1200, rhythm.intervals)
+        assertEquals(1200, rhythm.accepted)
+        assertEquals(1197, rhythm.pairs)
+        assertEquals(0.0, rhythm.rmssdMs!!, 0.001)
+        assertEquals(50, rhythm.restingHr)
+    }
+
+    @Test
+    fun recoveryIsBlankUntilThreeEarlierDaysThenFollowsTheFormula() {
+        val zone = ZoneOffset.UTC
+        val first = LocalDate.of(2026, 2, 1)
+        val days = (0..3).flatMap { offset ->
+            val start = first.plusDays(offset.toLong()).atStartOfDay(zone).toEpochSecond() + 3600
+            sleepRun(start, 1200, hr = 50) { index ->
+                if (offset < 3) {
+                    if (index % 2 == 0) 1000 else 1100
+                } else {
+                    if (index % 2 == 0) 1000 else 1200
+                }
+            }
+        }
+        val book = computeDays(days, zone)
+        val early = book.days.first { it.date == first }
+        assertNull(early.recovery!!.score)
+        assertEquals(0, early.recovery.baselineDays)
+        val last = book.days.first { it.date == first.plusDays(3) }
+        assertEquals(3, last.recovery!!.baselineDays)
+        val expected = (50.0 + 40.0 * ln(2.0)).coerceIn(0.0, 100.0)
+        assertEquals(expected, last.recovery.score!!, 0.001)
+        assertEquals(100.0, last.recovery.baselineRmssd!!, 0.001)
+        val text = dayBookText(book)
+        assertTrue(text.contains("Approximate"))
+        assertTrue(text.contains("not light, deep, or REM"))
+    }
+
+    @Test
+    fun banisterTrimpUsesTheAssumedMaxAndTheSleepRestingRate() {
+        val start = LocalDate.of(2026, 3, 1).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val sleep = sleepRun(start + 3600, 1200, hr = 50)
+        val work = (0 until 60).map { index ->
+            second(start + 20_000 + index, 1, hr = 120, motion = 0, activity = 2, steps = 100 + index)
+        }
+        val day = computeDays(sleep + work, ZoneOffset.UTC).days.single()
+        val perSecond = banisterSecond(120, 50, 190)
+        val sleepSecond = banisterSecond(50, 50, 190)
+        val expected = sleepSecond * 1200 + perSecond * 60
+        assertEquals(expected, day.strain!!.trimp!!, 1e-6)
+        assertEquals(0.5 * 0.64 * exp(1.92 * 0.5) / 60.0, perSecond, 1e-9)
+        assertEquals(60, day.runSeconds)
+        assertEquals(159L, day.stepIncrease)
+        assertEquals(0, day.stepWraps)
+    }
+
+    @Test
+    fun theStepCounterWrapsAndALargeDropIsAReset() {
+        val start = LocalDate.of(2026, 4, 1).atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+        val records = listOf(
+            second(start, 1, hr = 60, steps = 65_530),
+            second(start + 1, 1, hr = 60, steps = 20),
+            second(start + 2, 1, hr = 60, steps = 5_000),
+            second(start + 3, 1, hr = 60, steps = 100),
+        )
+        val day = computeDays(records, ZoneOffset.UTC).days.single()
+        assertEquals(26L + 4_980L, day.stepIncrease)
+        assertEquals(1, day.stepWraps)
+        assertEquals(1, day.stepResets)
+    }
+
+    private fun sleepRun(
+        start: Long,
+        seconds: Int,
+        hr: Int = 50,
+        rr: (Int) -> Int = { 1000 },
+    ): List<SecondRecord> = (0 until seconds).map { index ->
+        second(start + index, 1, hr = hr, rr = listOf(rr(index)), motion = DayRules.SLEEP, activity = 0)
+    }
+
+    private fun second(
+        unix: Long,
+        index: Long,
+        hr: Int?,
+        rr: List<Int> = emptyList(),
+        motion: Int? = 0,
+        activity: Int? = null,
+        steps: Int = 0,
+    ): SecondRecord = SecondRecord(
+        unixSeconds = unix,
+        recordIndex = index,
+        heartRateBpm = hr,
+        rrMillis = rr,
+        activityClass = activity,
+        bandMotion = motion,
+        stepCounter = steps,
+    )
 }

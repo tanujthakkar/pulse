@@ -15,8 +15,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 31
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.1.6"
         testInstrumentationRunner = "app.pulse.PulseTestRunner"
     }
     buildFeatures {
@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":feature:connect"))
     implementation(project(":feature:live"))
     implementation(project(":feature:sync"))
+    implementation(project(":feature:day"))
     implementation(project(":feature:debug"))
     implementation(project(":link"))
     implementation(project(":data"))

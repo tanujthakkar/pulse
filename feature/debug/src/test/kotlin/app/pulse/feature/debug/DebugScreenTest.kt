@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import app.pulse.ble.BondBegin
 import app.pulse.ble.DeviceBond
+import app.pulse.data.DayMetricsSource
 import app.pulse.data.DeviceDirectory
 import app.pulse.data.DeviceRow
 import app.pulse.link.HistorySyncHost
@@ -31,6 +32,7 @@ import app.pulse.wire.codec.FrameRing
 import app.pulse.wire.codec.HelloBody
 import app.pulse.wire.codec.HelloCommand
 import java.io.ByteArrayOutputStream
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -51,7 +53,7 @@ class DebugScreenTest {
         val ring = FrameRing()
         val intake = FrameIntake(ring)
         val link = quietLink()
-        val viewModel = DebugViewModel(link, EmptyDevices(), quietSync(link), ring)
+        val viewModel = DebugViewModel(link, EmptyDevices(), quietSync(link), ring, FixedDays("synthetic day metrics"))
         compose.setContent { DebugRoute(viewModel) }
         compose.onNodeWithTag("debug_empty").assertIsDisplayed()
         compose.onNodeWithText("redacted and are not stored", substring = true).assertExists()
@@ -102,16 +104,42 @@ class DebugScreenTest {
         compose.runOnIdle { viewModel.export { exported } }
         compose.onNodeWithTag("debug_export_status").assertTextContains("Exported 3 frames.")
         val text = exported.toString(Charsets.UTF_8)
+        assertTrue(text.startsWith("synthetic day metrics\n\n"))
+        assertTrue(text.indexOf("synthetic day metrics") < text.indexOf("pulse frames 3"))
         assertTrue(text.contains("pulse frames 3"))
         assertTrue(text.contains("«redacted»"))
         assertFalse(text.contains("SECRETBLOCK"))
         assertEquals(3, viewModel.stored.value)
     }
 
+    @Test
+    fun aFailedDayReadStaysALocalLineAboveTheFrames() {
+        val ring = FrameRing()
+        val viewModel = DebugViewModel(
+            quietLink(),
+            EmptyDevices(),
+            quietSync(quietLink()),
+            ring,
+            object : DayMetricsSource {
+                override fun report(zone: ZoneId): String = error("database")
+            },
+        )
+        val exported = ByteArrayOutputStream()
+        viewModel.export { exported }
+        val text = exported.toString(Charsets.UTF_8)
+        assertTrue(text.startsWith("Day metrics could not be read.\n"))
+        assertTrue(text.contains("pulse frames 0"))
+        assertFalse(text.contains("database"))
+    }
+
     private class EmptyDevices : DeviceDirectory {
         override fun save(row: DeviceRow) = Unit
 
         override fun latest(): DeviceRow? = null
+    }
+
+    private class FixedDays(private val text: String) : DayMetricsSource {
+        override fun report(zone: ZoneId): String = text
     }
 }
 

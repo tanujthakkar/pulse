@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.pulse.wire.codec.FrameNote
+import app.pulse.wire.codec.FrameRing
 
 /**
  * Recording state for the debug capture.
@@ -31,12 +32,17 @@ import app.pulse.wire.codec.FrameNote
  * Paused means new notifications are not stored, so an export can miss traffic
  * that the radio still delivered.
  */
-fun recordingStatus(paused: Boolean, stored: Int): String {
+fun recordingStatus(paused: Boolean, stored: Int, capacity: Int = FrameRing.CAPACITY): String {
     val count = "$stored stored."
-    return if (paused) {
-        "Recording is paused. New frames are not stored, so this capture can miss traffic. $count"
+    val full = if (stored >= capacity) {
+        " The ring is full, so older frames were dropped."
     } else {
-        "Recording is running. New frames are stored. $count"
+        ""
+    }
+    return if (paused) {
+        "Recording is paused. New frames are not stored, so this capture can miss traffic. $count$full"
+    } else {
+        "Recording is running. New frames are stored. $count$full"
     }
 }
 

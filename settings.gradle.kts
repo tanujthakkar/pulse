@@ -27,6 +27,7 @@ include(
     ":feature:connect",
     ":feature:live",
     ":feature:sync",
+    ":feature:day",
     ":feature:debug",
     ":testing:fakestrap",
     ":testing:golden",

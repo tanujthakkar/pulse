@@ -5,10 +5,12 @@ import org.junit.jupiter.api.Test
 
 class PulseRouteTest {
     @Test
-    fun shellHasTheFourSkeletonScreens() {
+    fun shellHasConnectLiveSyncDaysAndDebug() {
         assertEquals(
-            listOf("connect", "live", "sync", "debug"),
+            listOf("connect", "live", "sync", "days", "debug"),
             PulseRoute.entries.map { it.route },
         )
+        assertEquals("Dy", PulseRoute.Days.mark)
+        assertEquals("D", PulseRoute.Debug.mark)
     }
 }

@@ -30,8 +30,10 @@ object FrameVerdict {
 /**
  * Newest-first ring of [FrameNote].
  *
- * The debug screen keeps about the last [CAPACITY] frames. [setPaused] drops
- * new notes until recording resumes. Bytes are not retained here.
+ * The debug screen keeps the last [CAPACITY] frames. A full history backlog
+ * is on the order of 16,000 layout-18 records plus metadata, events, and
+ * console text, so the ring is sized for that capture. [setPaused] drops new
+ * notes until recording resumes. Bytes are not retained here.
  */
 class FrameRing(val capacity: Int = CAPACITY) {
     init {
@@ -74,7 +76,7 @@ class FrameRing(val capacity: Int = CAPACITY) {
     }
 
     companion object {
-        const val CAPACITY: Int = 5_000
+        const val CAPACITY: Int = 40_000
     }
 }
 

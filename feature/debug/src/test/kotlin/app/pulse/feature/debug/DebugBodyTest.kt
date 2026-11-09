@@ -44,6 +44,7 @@ class DebugBodyTest {
         assertTrue(exported.contains("Strap result 1: 1"))
         assertTrue(exported.contains("not a strap result"))
         assertFalse(exported.contains("GATT status 0 is success"))
+        assertTrue(exported.contains("Day metrics are at the top of a frame export."))
     }
 
     @Test
@@ -57,5 +58,7 @@ class DebugBodyTest {
         assertTrue(paused.contains("can miss traffic"))
         assertTrue(paused.contains("4 stored."))
         assertFalse(paused.contains("Recording is running."))
+        val full = recordingStatus(paused = false, stored = 40_000, capacity = 40_000)
+        assertTrue(full.contains("The ring is full, so older frames were dropped."))
     }
 }

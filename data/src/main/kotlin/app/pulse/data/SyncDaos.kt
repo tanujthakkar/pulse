@@ -67,6 +67,15 @@ interface R18SampleDao {
             "AND record_index = :recordIndex AND unix_s = :unixSeconds",
     )
     fun find(deviceId: String, recordIndex: Long, unixSeconds: Long): R18SampleRow?
+
+    @Query(
+        "SELECT unix_s, record_index, heart_rate_bpm, rr_count, " +
+            "rr_tick_0, rr_tick_1, rr_tick_2, rr_tick_3, " +
+            "activity_class, rest_state, step_counter " +
+            "FROM r18_sample WHERE device_id = :deviceId " +
+            "ORDER BY unix_s ASC, record_index ASC",
+    )
+    fun metricRows(deviceId: String): List<R18MetricRow>
 }
 
 @Dao

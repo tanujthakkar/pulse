@@ -2,6 +2,7 @@ package app.pulse.feature.debug
 
 import androidx.lifecycle.ViewModel
 import app.pulse.data.DataBuildInfo
+import app.pulse.data.DayMetricsSource
 import app.pulse.data.DeviceDirectory
 import app.pulse.data.DeviceRow
 import app.pulse.link.LinkBuildInfo
@@ -49,6 +50,7 @@ fun debugBody(snapshot: LinkSnapshot, stored: DeviceRow?, acknowledgement: Strin
     if (acknowledgement != null) {
         lines += acknowledgement
     }
+    lines += "Day metrics are at the top of a frame export."
     return lines.joinToString(separator = "\n")
 }
 
@@ -65,6 +67,7 @@ class DebugViewModel @Inject constructor(
     private val devices: DeviceDirectory,
     private val sync: HistorySyncHost,
     val frames: FrameRing,
+    private val days: DayMetricsSource,
 ) : ViewModel() {
     val title: String = "Debug"
 
@@ -116,9 +119,19 @@ class DebugViewModel @Inject constructor(
         publish()
     }
 
-    /** Writes the whole ring, including notes hidden by the current filter. */
+    /**
+     * Writes the day report, then the whole ring.
+     *
+     * Notes hidden by the current filter are included. A failed day read stays
+     * a local line and does not drop the frames.
+     */
     fun export(open: () -> OutputStream?) {
-        _exportStatus.value = exportFrames(open, frames.snapshot())
+        val prefix = try {
+            days.report()
+        } catch (_: Exception) {
+            "Day metrics could not be read.\n"
+        }
+        _exportStatus.value = exportFrames(open, frames.snapshot(), prefix)
     }
 
     override fun onCleared() {

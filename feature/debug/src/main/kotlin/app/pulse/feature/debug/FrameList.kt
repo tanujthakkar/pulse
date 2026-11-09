@@ -58,10 +58,18 @@ fun frameLogText(notes: List<FrameNote>): String = buildString {
  * open a network connection. A missing stream or an I/O failure returns
  * "Export failed."
  */
-fun exportFrames(open: () -> OutputStream?, notes: List<FrameNote>): String {
+fun exportFrames(open: () -> OutputStream?, notes: List<FrameNote>, prefix: String = ""): String {
+    val payload = buildString {
+        if (prefix.isNotEmpty()) {
+            append(prefix)
+            if (!prefix.endsWith('\n')) append('\n')
+            append('\n')
+        }
+        append(frameLogText(notes))
+    }
     return try {
         val stream = open() ?: return "Export failed."
-        stream.use { it.write(frameLogText(notes).toByteArray(Charsets.UTF_8)) }
+        stream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
         "Exported ${notes.size} frames."
     } catch (_: Exception) {
         "Export failed."

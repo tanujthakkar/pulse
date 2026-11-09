@@ -14,6 +14,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.pulse.feature.connect.ConnectRoute
+import app.pulse.feature.day.DayRoute
 import app.pulse.feature.debug.DebugRoute
 import app.pulse.feature.live.LiveRoute
 import app.pulse.feature.sync.SyncRoute
@@ -38,7 +39,7 @@ fun PulseNavHost() {
                                 restoreState = true
                             }
                         },
-                        icon = { Text(destination.label.take(1)) },
+                        icon = { Text(destination.mark) },
                         label = { Text(destination.label) },
                     )
                 }
@@ -54,6 +55,7 @@ fun PulseNavHost() {
             composable(PulseRoute.Connect.route) { ConnectRoute() }
             composable(PulseRoute.Live.route) { LiveRoute() }
             composable(PulseRoute.Sync.route) { SyncRoute() }
+            composable(PulseRoute.Days.route) { DayRoute() }
             composable(PulseRoute.Debug.route) { DebugRoute() }
         }
     }

@@ -47,8 +47,8 @@ class FrameLogTest {
     }
 
     @Test
-    fun defaultCapacityIsFiveThousand() {
-        assertEquals(5_000, FrameRing.CAPACITY)
+    fun defaultCapacityHoldsAFullHistoryBacklog() {
+        assertEquals(40_000, FrameRing.CAPACITY)
         val ring = FrameRing()
         val intake = FrameIntake(ring)
         repeat(FrameRing.CAPACITY + 1) { index ->

@@ -61,6 +61,15 @@ class FrameListTest {
     }
 
     @Test
+    fun exportPrefixPrecedesTheFrameLog() {
+        val out = ByteArrayOutputStream()
+        assertEquals("Exported 0 frames.", exportFrames({ out }, emptyList(), "Day 2026-01-02\n"))
+        val text = out.toString(Charsets.UTF_8)
+        assertTrue(text.startsWith("Day 2026-01-02\n\n"))
+        assertTrue(text.contains("pulse frames 0"))
+    }
+
+    @Test
     fun exportFailureStaysLocal() {
         assertEquals("Export failed.", exportFrames({ null }, emptyList()))
         val broken = object : OutputStream() {
