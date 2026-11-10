@@ -1,66 +1,45 @@
 package app.pulse
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.runtime.getValue
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.pulse.feature.connect.ConnectRoute
-import app.pulse.feature.day.DayRoute
 import app.pulse.feature.debug.DebugRoute
 import app.pulse.feature.edgeimport.EdgeImportRoute
+import app.pulse.feature.home.ACTIVITY_ROUTE
+import app.pulse.feature.home.ActivityDetailRoute
 import app.pulse.feature.home.HomeRoute
 import app.pulse.feature.home.PulsePalette
-import app.pulse.feature.live.LiveRoute
-import app.pulse.feature.sync.SyncRoute
+import app.pulse.feature.home.activityRoute
 
 @Composable
 fun PulseNavHost() {
     val navController = rememberNavController()
-    val backStack by navController.currentBackStackEntryAsState()
-    val current = backStack?.destination?.route
-    Scaffold(
-        containerColor = PulsePalette.background,
-        bottomBar = {
-            NavigationBar(containerColor = PulsePalette.surface) {
-                PulseRoute.entries.filter { it.inBar }.forEach { destination ->
-                    NavigationBarItem(
-                        selected = current == destination.route,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Text(destination.mark) },
-                        label = { Text(destination.label) },
-                    )
-                }
-            }
-        },
-    ) { padding ->
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(PulsePalette.background),
+    ) {
         NavHost(
             navController = navController,
             startDestination = PulseRoute.Home.route,
-            modifier = Modifier.padding(padding),
         ) {
-            composable(PulseRoute.Home.route) { HomeRoute() }
-            composable(PulseRoute.Live.route) { LiveRoute() }
-            composable(PulseRoute.Sync.route) { SyncRoute() }
-            composable(PulseRoute.Days.route) { DayRoute() }
+            composable(PulseRoute.Home.route) {
+                HomeRoute(
+                    onOpenSettings = { navController.navigate(PulseRoute.More.route) },
+                    onOpenActivity = { card -> navController.navigate(activityRoute(card)) },
+                )
+            }
+            composable(ACTIVITY_ROUTE) {
+                ActivityDetailRoute(onBack = { navController.popBackStack() })
+            }
             composable(PulseRoute.More.route) {
-                MoreScreen(
+                MoreRoute(
                     onConnect = { navController.navigate(PulseRoute.Connect.route) },
                     onDebug = { navController.navigate(PulseRoute.Debug.route) },
                     onImport = { navController.navigate(IMPORT_ROUTE) },

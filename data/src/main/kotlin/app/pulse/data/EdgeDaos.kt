@@ -162,10 +162,24 @@ interface EdgeImportDao {
     fun metricOneHz(source: String): List<EdgeOneHzMetricRow>
 
     @Query(
+        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state " +
+            "FROM edge_onehz WHERE source = :source AND ts_ms >= :startMs AND ts_ms < :endMs " +
+            "ORDER BY ts_ms ASC",
+    )
+    fun metricOneHzBetween(source: String, startMs: Long, endMs: Long): List<EdgeOneHzMetricRow>
+
+    @Query(
         "SELECT ts_ms, rr_ms FROM edge_rr WHERE source = :source " +
             "ORDER BY ts_ms ASC, beat_index ASC",
     )
     fun metricRr(source: String): List<EdgeRrMetricRow>
+
+    @Query(
+        "SELECT ts_ms, rr_ms FROM edge_rr WHERE source = :source " +
+            "AND ts_ms >= :startMs AND ts_ms < :endMs " +
+            "ORDER BY ts_ms ASC, beat_index ASC",
+    )
+    fun metricRrBetween(source: String, startMs: Long, endMs: Long): List<EdgeRrMetricRow>
 
     @Query(
         "SELECT day_id, algo_version, onset_ts, offset_ts FROM edge_sleep " +

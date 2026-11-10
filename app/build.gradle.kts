@@ -15,8 +15,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 31
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.1.9"
+        versionCode = 11
+        versionName = "0.1.10"
         testInstrumentationRunner = "app.pulse.PulseTestRunner"
     }
     buildFeatures {
@@ -58,9 +58,7 @@ kotlin {
 
 dependencies {
     implementation(project(":feature:connect"))
-    implementation(project(":feature:live"))
     implementation(project(":feature:sync"))
-    implementation(project(":feature:day"))
     implementation(project(":feature:home"))
     implementation(project(":feature:debug"))
     implementation(project(":feature:edgeimport"))

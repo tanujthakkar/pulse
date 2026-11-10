@@ -1,10 +1,9 @@
 package app.pulse.feature.home
 
-import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import app.pulse.metrics.DayResult
@@ -16,6 +15,8 @@ import app.pulse.metrics.approximateStrain21
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Locale
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,75 +27,123 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33], qualifiers = "w480dp-h1400dp")
 class HomeScreenTest {
     @get:Rule
-    val compose = createAndroidComposeRule<ComponentActivity>()
+    val compose = createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     @Test
-    fun aFullDayShowsTheThreeDialsAndTheStats() {
-        var previous = 0
+    fun aFullDayShowsSleepThenRecoveryThenStrain() {
+        var settings = 0
         val content = homeContent(
             day = sampleDay(recovery = 72.0, baselineDays = 4),
             date = DATE,
-            canGoPrevious = true,
-            canGoNext = false,
+            today = DATE,
+            logged = emptyList(),
             live = sampleLive(),
         )
         compose.setContent {
-            HomeScreen(content, onPrevious = { previous += 1 }, onNext = {})
+            HomeScreen(
+                content,
+                onOpenSettings = { settings += 1 },
+                onPickDate = {},
+                onBackToToday = {},
+                onOpenActivity = {},
+                onSaveActivity = { _, _, _, _ -> },
+                onDeleteActivity = {},
+            )
         }
-        shows("home_date", "Sunday, Nov 8")
+        compose.onNodeWithTag("home_header").assertTextContains("Today")
         shows("home_source", "mixed")
-        shows("home_recovery", "72")
+        val dials = compose.onNodeWithTag("home_dials").onChildren()
+        dials[0].assertTextContains("Sleep")
+        dials[0].assertTextContains("7h 30m")
+        dials[1].assertTextContains("Recovery")
+        dials[1].assertTextContains("72")
+        dials[2].assertTextContains("Strain")
         val strain = String.format(Locale.US, "%.1f", approximateStrain21(180.0))
-        shows("home_strain", strain)
-        shows("home_strain", "Approximate")
-        shows("home_sleep", "7h 30m")
-        shows("home_sleep", "8 h reference")
+        dials[2].assertTextContains(strain)
         shows("home_hrv", "42 ms")
         shows("home_rhr", "48 bpm")
+        shows("home_sleep_hours", "7h 30m")
         shows("home_steps", "8,660")
-        shows("home_steps", "Strap 7,660")
-        shows("home_live", "Live heart rate is unavailable.")
-        shows("home_live", "Last sync: none stored.")
-        shows("home_live", "Battery: 81%")
-        shows("home_live", "Not connected")
-        shows("home_sample", "Sample data")
-        compose.onNodeWithTag("home_prev").assertIsEnabled().performClick()
-        compose.onNodeWithTag("home_next").assertIsNotEnabled()
-        org.junit.Assert.assertEquals(1, previous)
+        shows("home_live", "— · Not connected")
+        shows("home_battery", "81%")
+        shows("home_sync", "—")
+        shows("activity_$SLEEP_START", "Sleep")
+        compose.onNodeWithTag("home_settings").performClick()
+        assertEquals(1, settings)
     }
 
     @Test
-    fun recoverySaysWhenTheBaselineIsShort() {
+    fun aShortBaselineLeavesTheRecoveryDialBlank() {
         val content = homeContent(
             day = sampleDay(recovery = null, baselineDays = 1),
             date = DATE,
-            canGoPrevious = false,
-            canGoNext = false,
+            today = DATE,
+            logged = emptyList(),
             live = sampleLive(),
         )
-        compose.setContent { HomeScreen(content, onPrevious = {}, onNext = {}) }
-        shows("home_recovery", "Recovery needs 3 nights.")
+        compose.setContent { host(content) }
         shows("home_recovery", "—")
-        shows("home_strain", "Approximate")
+        shows("home_recovery", "Recovery")
+        shows("home_strain", "13.3")
     }
 
     @Test
-    fun anEmptyDaySaysThereAreNoSeconds() {
+    fun anEmptyDayShowsDashes() {
         val content = homeContent(
             day = null,
             date = DATE,
-            canGoPrevious = false,
-            canGoNext = false,
+            today = DATE.minusDays(1),
+            logged = emptyList(),
             live = sampleLive(battery = null),
         )
-        compose.setContent { HomeScreen(content, onPrevious = {}, onNext = {}) }
+        var today = 0
+        compose.setContent { host(content, onBackToToday = { today += 1 }) }
         shows("home_source", "no data")
-        shows("home_recovery", "No strap or Edge seconds")
-        shows("home_strain", "No strap or Edge seconds")
-        shows("home_sleep", "No strap or Edge seconds")
-        shows("home_hrv", "HRV needs a main sleep.")
-        shows("home_steps", "No steps stored")
-        shows("home_live", "Battery: not stored.")
+        shows("home_header", "Sun, Nov 8")
+        shows("home_recovery", "—")
+        shows("home_hrv", "—")
+        shows("home_steps", "—")
+        shows("home_battery", "—")
+        shows("activity_empty", "No activities")
+        compose.onNodeWithTag("home_today").performClick()
+        assertEquals(1, today)
+    }
+
+    @Test
+    fun browsingAMonthDoesNotLoadADate() {
+        val content = homeContent(
+            day = sampleDay(recovery = 72.0, baselineDays = 4),
+            date = DATE,
+            today = DATE,
+            logged = emptyList(),
+            live = sampleLive(),
+        )
+        val picks = ArrayList<LocalDate>()
+        compose.setContent { host(content, onPickDate = { picks += it }) }
+        compose.onNodeWithTag("home_header").performClick()
+        shows("cal_month", "November 2026")
+        compose.onNodeWithTag("cal_next").performClick()
+        shows("cal_month", "December 2026")
+        assertTrue(picks.isEmpty())
+        compose.onNodeWithTag("cal_day_3").performClick()
+        assertEquals(listOf(LocalDate.of(2026, 12, 3)), picks)
+    }
+
+    @Composable
+    private fun host(
+        content: HomeContent,
+        onPickDate: (LocalDate) -> Unit = {},
+        onBackToToday: () -> Unit = {},
+    ) {
+        HomeScreen(
+            content,
+            onOpenSettings = {},
+            onPickDate = onPickDate,
+            onBackToToday = onBackToToday,
+            onOpenActivity = {},
+            onSaveActivity = { _, _, _, _ -> },
+            onDeleteActivity = {},
+        )
     }
 
     private fun shows(tag: String, text: String) {
@@ -111,8 +160,8 @@ class HomeScreenTest {
 
     private fun sampleDay(recovery: Double?, baselineDays: Int): DayResult {
         val main = SleepEpisode(
-            startUnix = 1_700_000_000L,
-            endUnix = 1_700_000_000L + 7 * 3600 + 30 * 60,
+            startUnix = SLEEP_START,
+            endUnix = SLEEP_START + 7 * 3600 + 30 * 60,
             sleepSeconds = 7 * 3600 + 30 * 60,
             spanSeconds = (7 * 3600 + 30 * 60).toLong(),
             endDate = DATE,
@@ -183,5 +232,5 @@ class HomeScreenTest {
     }
 }
 
+private const val SLEEP_START: Long = 1_700_000_000L
 private val DATE: LocalDate = LocalDate.of(2026, 11, 8)
-

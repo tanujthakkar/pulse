@@ -25,6 +25,7 @@ object DataBindings {
                 PulseMigrations.FROM_2_TO_3,
                 PulseMigrations.FROM_3_TO_4,
                 PulseMigrations.FROM_4_TO_5,
+                PulseMigrations.FROM_5_TO_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -48,4 +49,8 @@ object DataBindings {
     @Provides
     @Singleton
     fun edgeImporter(database: PulseDatabase): EdgeImporter = EdgeImporter(database)
+
+    @Provides
+    @Singleton
+    fun activityLog(database: PulseDatabase): ActivityLog = RoomActivityLog(database)
 }

@@ -1,6 +1,7 @@
 package app.pulse
 
 import android.app.Application
+import app.pulse.link.AutoSyncCoordinator
 import app.pulse.link.ConnectedLinkHost
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -8,6 +9,7 @@ import javax.inject.Inject
 @HiltAndroidApp
 class PulseApp : Application() {
     @Inject lateinit var connectedLink: ConnectedLinkHost
+    @Inject lateinit var autoSync: AutoSyncCoordinator
 
     override fun onCreate() {
         super.onCreate()
@@ -15,5 +17,6 @@ class PulseApp : Application() {
         // Touching it here arms that watch before any Activity can start,
         // pause, or leave.
         connectedLink.arm()
+        autoSync.start()
     }
 }

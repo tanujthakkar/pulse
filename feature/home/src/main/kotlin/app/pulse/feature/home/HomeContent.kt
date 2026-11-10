@@ -1,12 +1,17 @@
 package app.pulse.feature.home
 
 import app.pulse.link.LinkPhase
+import app.pulse.metrics.ActivityCard
+import app.pulse.metrics.ActivityKind
 import app.pulse.metrics.DayResult
 import app.pulse.metrics.DayRules
+import app.pulse.metrics.LoggedActivity
+import app.pulse.metrics.activityTimeline
 import app.pulse.metrics.approximateStrain21
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -16,7 +21,6 @@ data class DialModel(
     val value: String,
     val progress: Float,
     val tone: DialTone,
-    val detail: String,
 )
 
 data class HomeLive(
@@ -28,106 +32,78 @@ data class HomeLive(
     val sampleBanner: String? = null,
 )
 
+data class HomeActivity(
+    val card: ActivityCard,
+    val timeLabel: String,
+)
+
 data class HomeContent(
-    val dateLabel: String,
-    val canGoPrevious: Boolean,
-    val canGoNext: Boolean,
+    val date: LocalDate,
+    val headerLabel: String,
+    val isToday: Boolean,
+    val zone: ZoneId,
     val sourceLabel: String,
+    val sleep: DialModel,
     val recovery: DialModel,
     val strain: DialModel,
-    val sleep: DialModel,
+    val activities: List<HomeActivity>,
     val hrv: String,
-    val hrvDetail: String,
     val resting: String,
-    val restingDetail: String,
     val sleepStat: String,
-    val sleepDetail: String,
     val steps: String,
-    val stepsDetail: String,
     val liveValue: String,
-    val liveDetail: String,
     val lastSync: String,
     val battery: String,
-    val connection: String,
     val sampleBanner: String?,
 )
 
 /**
  * Home-screen copy for one local day.
  *
- * Blank dials name the missing input. Recovery under 34 is red, under 67 is
- * yellow, and 67 and above is green. Those cuts are display bands for the
- * Pulse formula, not a clinical threshold.
+ * The dials are the value only. Recovery under 34 is red, under 67 is yellow,
+ * and 67 and above is green. Those cuts are display bands for the Pulse
+ * formula. Strain is the approximate 0–21 dial.
  */
 fun homeContent(
     day: DayResult?,
     date: LocalDate,
-    canGoPrevious: Boolean,
-    canGoNext: Boolean,
+    today: LocalDate,
+    logged: List<LoggedActivity>,
     live: HomeLive,
 ): HomeContent {
     val noSeconds = day == null || (day.strapSeconds == 0 && day.edgeSeconds == 0)
-    val recovery = recoveryDial(day, noSeconds)
-    val strain = strainDial(day, noSeconds)
-    val sleep = sleepDial(day, noSeconds)
     val rhythm = day?.rhythm
     val rmssd = rhythm?.rmssdMs
     val restingHr = rhythm?.restingHr
-    val hrv = if (noSeconds || day?.main == null) {
-        "—" to "HRV needs a main sleep."
-    } else if (rmssd == null) {
-        "—" to "Not enough accepted R-R pairs for HRV."
-    } else {
-        "${rmssd.roundToInt()} ms" to "RMSSD during the main sleep."
+    val hrv = when {
+        noSeconds || day?.main == null || rmssd == null -> "—"
+        else -> "${rmssd.roundToInt()} ms"
     }
-    val resting = if (noSeconds || day?.main == null) {
-        "—" to "Resting HR needs a main sleep."
-    } else if (restingHr == null) {
-        "—" to "Not enough heart-rate samples for resting HR."
-    } else {
-        "$restingHr bpm" to "10th percentile during the main sleep."
+    val resting = when {
+        noSeconds || day?.main == null || restingHr == null -> "—"
+        else -> "$restingHr bpm"
     }
     val sleepSeconds = day?.main?.sleepSeconds
-    val sleepStat = if (sleepSeconds == null || noSeconds) {
-        "—" to "No main sleep ending this day."
-    } else {
-        formatDuration(sleepSeconds) to "Main sleep. 8 h is only a reference ring."
-    }
-    val strapSteps = day?.stepIncrease ?: 0L
-    val edgeSteps = day?.edgeStepIncrease ?: 0L
-    val steps = when {
-        noSeconds -> "—" to "No steps stored for this day."
-        strapSteps > 0L && edgeSteps > 0L ->
-            formatSteps(strapSteps + edgeSteps) to "Strap ${formatSteps(strapSteps)} · Edge ${formatSteps(edgeSteps)}."
-        else -> formatSteps(strapSteps + edgeSteps) to "Counted inside each source. Overlap is not added twice."
-    }
-    val liveValue = live.bpm?.let { "$it" } ?: "—"
-    val liveDetail = if (live.bpm == null) {
-        "Live heart rate is unavailable."
-    } else {
-        "bpm from the open session."
-    }
+    val sleepStat = if (sleepSeconds == null || noSeconds) "—" else formatDuration(sleepSeconds.toLong())
+    val steps = if (noSeconds) "—" else formatSteps((day?.stepIncrease ?: 0L) + (day?.edgeStepIncrease ?: 0L))
+    val bpm = live.bpm?.let { "$it bpm" } ?: "—"
     return HomeContent(
-        dateLabel = DATE.format(date),
-        canGoPrevious = canGoPrevious,
-        canGoNext = canGoNext,
+        date = date,
+        headerLabel = if (date == today) "Today" else DATE.format(date),
+        isToday = date == today,
+        zone = live.zone,
         sourceLabel = sourceLabel(day, noSeconds),
-        recovery = recovery,
-        strain = strain,
-        sleep = sleep,
-        hrv = hrv.first,
-        hrvDetail = hrv.second,
-        resting = resting.first,
-        restingDetail = resting.second,
-        sleepStat = sleepStat.first,
-        sleepDetail = sleepStat.second,
-        steps = steps.first,
-        stepsDetail = steps.second,
-        liveValue = liveValue,
-        liveDetail = liveDetail,
+        sleep = sleepDial(day, noSeconds),
+        recovery = recoveryDial(day, noSeconds),
+        strain = strainDial(day, noSeconds),
+        activities = activitiesFor(day, date, logged, live.zone),
+        hrv = hrv,
+        resting = resting,
+        sleepStat = sleepStat,
+        steps = steps,
+        liveValue = "$bpm · ${connectionLabel(live.phase)}",
         lastSync = lastSync(live),
-        battery = live.batteryPercent?.let { "Battery: $it%" } ?: "Battery: not stored.",
-        connection = "Strap: ${connectionLabel(live.phase)}.",
+        battery = live.batteryPercent?.let { "$it%" } ?: "—",
         sampleBanner = live.sampleBanner,
     )
 }
@@ -138,96 +114,115 @@ fun connectionLabel(phase: LinkPhase): String = when (phase) {
     else -> "Not connected"
 }
 
+/**
+ * Month browsing does not load a day. Only [pick] does.
+ */
+class HomeDateSelection(
+    startMonth: YearMonth,
+    private val load: (LocalDate) -> Unit,
+) {
+    var visibleMonth: YearMonth = startMonth
+        private set
+    var selected: LocalDate? = null
+        private set
+    var loads: Int = 0
+        private set
+
+    fun browse(month: YearMonth) {
+        visibleMonth = month
+    }
+
+    fun pick(date: LocalDate) {
+        selected = date
+        visibleMonth = YearMonth.from(date)
+        loads += 1
+        load(date)
+    }
+}
+
+internal fun activitiesFor(
+    day: DayResult?,
+    date: LocalDate,
+    logged: List<LoggedActivity>,
+    zone: ZoneId,
+): List<HomeActivity> {
+    val sleep = day?.episodes.orEmpty().filter { it.endDate == date }
+    val manual = logged.filter { Instant.ofEpochSecond(it.startUnix).atZone(zone).toLocalDate() == date }
+    return activityTimeline(sleep, manual).map { card ->
+        HomeActivity(card = card, timeLabel = "${clock(card.startUnix, zone)} – ${clock(card.endUnix, zone)}")
+    }
+}
+
 private fun recoveryDial(day: DayResult?, noSeconds: Boolean): DialModel {
     val score = day?.recovery?.score
-    return when {
-        noSeconds -> blankDial("Recovery", "No strap or Edge seconds for this day.")
-        day?.main == null -> blankDial("Recovery", "Recovery needs a main sleep.")
-        score == null -> blankDial("Recovery", "Recovery needs 3 nights.")
-        else -> {
-            val shown = score.roundToInt()
-            DialModel(
-                title = "Recovery",
-                value = shown.toString(),
-                progress = (score / 100.0).toFloat().coerceIn(0f, 1f),
-                tone = when {
-                    score >= 67.0 -> DialTone.GREEN
-                    score >= 34.0 -> DialTone.YELLOW
-                    else -> DialTone.RED
-                },
-                detail = "Pulse formula, 0–100. Not a clinical score.",
-            )
-        }
-    }
+    if (noSeconds || day?.main == null || score == null) return blankDial("Recovery")
+    return DialModel(
+        title = "Recovery",
+        value = score.roundToInt().toString(),
+        progress = (score / 100.0).toFloat().coerceIn(0f, 1f),
+        tone = when {
+            score >= 67.0 -> DialTone.GREEN
+            score >= 34.0 -> DialTone.YELLOW
+            else -> DialTone.RED
+        },
+    )
 }
 
 private fun strainDial(day: DayResult?, noSeconds: Boolean): DialModel {
     val trimp = day?.strain?.trimp
-    return when {
-        noSeconds -> blankDial("Strain", "No strap or Edge seconds for this day.")
-        trimp == null -> blankDial("Strain", "Strain needs a resting heart rate from the main sleep.")
-        else -> {
-            val dial = approximateStrain21(trimp)
-            DialModel(
-                title = "Strain",
-                value = String.format(Locale.US, "%.1f", dial),
-                progress = (dial / 21.0).toFloat().coerceIn(0f, 1f),
-                tone = DialTone.BLUE,
-                detail = "Approximate 0–21 from Banister TRIMP ${formatTrimp(trimp)}. Not a strain score.",
-            )
-        }
-    }
+    if (noSeconds || trimp == null) return blankDial("Strain")
+    val dial = approximateStrain21(trimp)
+    return DialModel(
+        title = "Strain",
+        value = String.format(Locale.US, "%.1f", dial),
+        progress = (dial / 21.0).toFloat().coerceIn(0f, 1f),
+        tone = DialTone.BLUE,
+    )
 }
 
 private fun sleepDial(day: DayResult?, noSeconds: Boolean): DialModel {
     val seconds = day?.main?.sleepSeconds
-    return when {
-        noSeconds -> blankDial("Sleep", "No strap or Edge seconds for this day.")
-        seconds == null -> blankDial("Sleep", "No main sleep ending this day.")
-        else -> {
-            val fraction = seconds.toFloat() / DayRules.SLEEP_REFERENCE_SECONDS.toFloat()
-            DialModel(
-                title = "Sleep",
-                value = formatDuration(seconds),
-                progress = fraction.coerceIn(0f, 1f),
-                tone = DialTone.PURPLE,
-                detail = "Share of an 8 h reference. Not a personal sleep need.",
-            )
-        }
-    }
+    if (noSeconds || seconds == null) return blankDial("Sleep")
+    val fraction = seconds.toFloat() / DayRules.SLEEP_REFERENCE_SECONDS.toFloat()
+    return DialModel(
+        title = "Sleep",
+        value = formatDuration(seconds.toLong()),
+        progress = fraction.coerceIn(0f, 1f),
+        tone = DialTone.PURPLE,
+    )
 }
 
-private fun blankDial(title: String, detail: String) = DialModel(
+private fun blankDial(title: String) = DialModel(
     title = title,
     value = "—",
     progress = 0f,
     tone = DialTone.MUTED,
-    detail = detail,
 )
 
 private fun sourceLabel(day: DayResult?, noSeconds: Boolean): String = when {
-    noSeconds -> "no data"
-    day == null -> "no data"
+    noSeconds || day == null -> "no data"
     day.strapSeconds > 0 && day.edgeSeconds > 0 -> "mixed"
     day.edgeSeconds > 0 -> "Edge import"
     else -> "strap"
 }
 
 private fun lastSync(live: HomeLive): String {
-    val seconds = live.lastSyncUnixSeconds ?: return "Last sync: none stored."
-    val text = SYNC.format(Instant.ofEpochSecond(seconds).atZone(live.zone))
-    return "Last sync: $text."
+    val seconds = live.lastSyncUnixSeconds ?: return "—"
+    return SYNC.format(Instant.ofEpochSecond(seconds).atZone(live.zone))
 }
 
-private fun formatDuration(seconds: Int): String {
-    val hours = seconds / 3600
-    val minutes = (seconds % 3600) / 60
+internal fun formatDuration(seconds: Long): String {
+    val whole = seconds.coerceAtLeast(0L)
+    val hours = whole / 3600
+    val minutes = (whole % 3600) / 60
     return "${hours}h ${minutes}m"
 }
 
 private fun formatSteps(steps: Long): String = String.format(Locale.US, "%,d", steps)
 
-private fun formatTrimp(trimp: Double): String = String.format(Locale.US, "%.1f", trimp)
+private fun clock(unixSeconds: Long, zone: ZoneId): String =
+    CLOCK.format(Instant.ofEpochSecond(unixSeconds).atZone(zone))
 
-private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, MMM d", Locale.US)
+private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
 private val SYNC: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d, h:mm a", Locale.US)
+private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.US)

@@ -37,6 +37,8 @@ dependencies {
     implementation(project(":data"))
     implementation(project(":sync"))
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.work.runtime)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit.jupiter)

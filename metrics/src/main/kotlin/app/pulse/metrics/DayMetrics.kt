@@ -890,3 +890,26 @@ private fun num(value: Double?): String {
     if (value == null) return "none"
     return String.format(Locale.US, "%.4f", value)
 }
+
+/**
+ * HRV and resting HR for one sleep window.
+ *
+ * Uses the same second range as the day's main-sleep rhythm. Stages are not
+ * computed. Stored band motion is only wake, still, sleep, or up.
+ */
+fun sleepRhythm(
+    records: List<SecondRecord>,
+    startUnix: Long,
+    endUnix: Long,
+    edgeProvided: Boolean,
+): Rhythm {
+    val episode = SleepEpisode(
+        startUnix = startUnix,
+        endUnix = endUnix,
+        sleepSeconds = (endUnix - startUnix).coerceAtLeast(0L).toInt(),
+        spanSeconds = (endUnix - startUnix).coerceAtLeast(0L),
+        endDate = LocalDate.EPOCH,
+        edgeProvided = edgeProvided,
+    )
+    return measure(records, episode)
+}

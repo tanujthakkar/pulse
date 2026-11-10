@@ -339,6 +339,7 @@ class DeviceSchemaMigrationTest {
                 PulseMigrations.FROM_2_TO_3,
                 PulseMigrations.FROM_3_TO_4,
                 PulseMigrations.FROM_4_TO_5,
+                PulseMigrations.FROM_5_TO_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -401,6 +402,7 @@ class DeviceSchemaMigrationTest {
                 PulseMigrations.FROM_2_TO_3,
                 PulseMigrations.FROM_3_TO_4,
                 PulseMigrations.FROM_4_TO_5,
+                PulseMigrations.FROM_5_TO_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -449,7 +451,11 @@ class DeviceSchemaMigrationTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V3)
-            .addMigrations(PulseMigrations.FROM_3_TO_4, PulseMigrations.FROM_4_TO_5)
+            .addMigrations(
+                PulseMigrations.FROM_3_TO_4,
+                PulseMigrations.FROM_4_TO_5,
+                PulseMigrations.FROM_5_TO_6,
+            )
             .allowMainThreadQueries()
             .build()
         val session = room.sessions().find(1)
@@ -462,10 +468,62 @@ class DeviceSchemaMigrationTest {
         room.close()
     }
 
+    @Test
+    fun version5DeviceSurvivesTheActivityTable() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase(NAME_V5)
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(NAME_V5)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(5) {
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            db.execSQL(DEVICE_V1)
+                            PulseMigrations.FROM_1_TO_2.migrate(db)
+                            PulseMigrations.FROM_2_TO_3.migrate(db)
+                            PulseMigrations.FROM_3_TO_4.migrate(db)
+                            PulseMigrations.FROM_4_TO_5.migrate(db)
+                        }
+
+                        override fun onUpgrade(
+                            db: SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                )
+                .build(),
+        )
+        helper.writableDatabase.execSQL(
+            "INSERT INTO `device` (`address`, `helloFirmware`, `informationFirmware`, " +
+                "`commandBatteryPercent`, `serviceBatteryPercent`, `updatedAtMillis`) " +
+                "VALUES ('AA:BB:CC:DD:EE:FF', '50.42.1.0', NULL, 80, 81, 11)",
+        )
+        helper.close()
+
+        val room = Room.databaseBuilder(context, PulseDatabase::class.java, NAME_V5)
+            .addMigrations(PulseMigrations.FROM_5_TO_6)
+            .allowMainThreadQueries()
+            .build()
+        assertEquals("AA:BB:CC:DD:EE:FF", room.devices().latest()?.address)
+        assertEquals("50.42.1.0", room.devices().latest()?.helloFirmware)
+        assertEquals(0, room.activities().all().size)
+        val saved = room.activities().insert(ManualActivityRow(type = "Run", startUnix = 10, endUnix = 20))
+        val stored = room.activities().all().single()
+        assertEquals(saved, stored.id)
+        assertEquals("Run", stored.type)
+        room.activities().update(stored.copy(type = "Walk"))
+        assertEquals("Walk", room.activities().all().single().type)
+        room.activities().delete(saved)
+        assertEquals(0, room.activities().all().size)
+        room.close()
+    }
+
     private companion object {
         const val NAME: String = "pulse-migrate.db"
         const val NAME_V2: String = "pulse-migrate-v2.db"
         const val NAME_V3: String = "pulse-migrate-v3.db"
+        const val NAME_V5: String = "pulse-migrate-v5.db"
         const val DEVICE_V1: String =
             "CREATE TABLE IF NOT EXISTS `device` (" +
                 "`address` TEXT NOT NULL, " +

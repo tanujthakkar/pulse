@@ -7,7 +7,9 @@ import app.pulse.link.LinkBuildInfo
 import app.pulse.sync.SyncActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * Manual history sync.
@@ -31,6 +33,11 @@ class SyncViewModel @Inject constructor(
     val modulePins: String = "${LinkBuildInfo.SPEC}:${DataBuildInfo.SPEC}"
 
     val activity: StateFlow<SyncActivity> = sync.activity
+
+    /** The user switch. The flow does not write the stored default. */
+    val historyAckEnabled: Flow<Boolean> = sync.activity.map { it.historyAckEnabled }
+
+    fun currentHistoryAck(): Boolean = sync.activity.value.historyAckEnabled
 
     fun syncNow() {
         sync.syncNow()

@@ -733,6 +733,15 @@ class HistorySyncEngineTest {
     }
 
     @Test
+    fun anAutomaticSyncWithTheSwitchOffSendsNoAck() {
+        val off = run(MemorySyncStore(), script(), ackEnabled = { false })
+        assertTrue(off.engine.isActive)
+        assertEquals(1, off.store.chunks.size)
+        assertNull(off.store.chunks.single().ackedAt)
+        assertTrue(off.written.none { commandOf(it) == HistoryAckCommand.NUMBER })
+    }
+
+    @Test
     fun aSpecialControlWordIsStoredAndNotAcknowledged() {
         val token = sampleToken()
         val run = run(MemorySyncStore(), script(chunks = listOf(ScriptChunk(token, listOf(sampleRecord())))))

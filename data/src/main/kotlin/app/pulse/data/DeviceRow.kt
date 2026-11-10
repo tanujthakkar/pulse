@@ -55,8 +55,9 @@ interface DeviceDao {
         EdgeMetricVersionRow::class,
         EdgeWakeFeaturesRow::class,
         EdgeSubstrateArchiveRow::class,
+        ManualActivityRow::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class PulseDatabase : RoomDatabase() {
@@ -67,6 +68,8 @@ abstract class PulseDatabase : RoomDatabase() {
     abstract fun samples(): R18SampleDao
     abstract fun batteries(): DeviceBatteryDao
     abstract fun edgeImport(): EdgeImportDao
+
+    abstract fun activities(): ManualActivityDao
 }
 
 interface DeviceDirectory {

@@ -2,14 +2,17 @@ package app.pulse.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.pulse.data.ActivityLog
 import app.pulse.data.DayMetricsSource
 import app.pulse.data.DaySnapshot
 import app.pulse.link.LinkSnapshot
 import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapLink
 import app.pulse.metrics.DayBook
+import app.pulse.metrics.LoggedActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
@@ -22,14 +25,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Home reads the day book that Days already computes.
+ * Home reads the stored day book and the typed activities.
  *
- * It does not send strap commands. Live bpm, battery, and connection are
- * whatever the open session has already published.
+ * Changing the visible month does not come through here. [pick] shows a date
+ * from the book already loaded and does not read it again. Adding an activity
+ * writes the activity row only.
+ *
+ * This does not send strap commands. Live bpm and battery are whatever the
+ * open session has already published.
  */
 @HiltViewModel
 class HomeViewModel internal constructor(
     private val days: DayMetricsSource,
+    private val activities: ActivityLog,
     private val link: StrapLink,
     private val heart: LiveHeartRateFeed,
     private val clock: () -> LocalDate,
@@ -38,15 +46,17 @@ class HomeViewModel internal constructor(
     @Inject
     constructor(
         days: DayMetricsSource,
+        activities: ActivityLog,
         link: StrapLink,
         heart: LiveHeartRateFeed,
-    ) : this(days, link, heart, { LocalDate.now() }, newHomeExecutor())
+    ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor())
 
     private val generation = AtomicInteger()
     private val _ui = MutableStateFlow<HomeContent?>(null)
     val ui: StateFlow<HomeContent?> = _ui.asStateFlow()
 
     private var snapshot = DaySnapshot(DayBook(ZoneId.systemDefault().id, emptyList(), null), null, null)
+    private var logged: List<LoggedActivity> = emptyList()
     private var selected: LocalDate? = null
     private var linkState = LinkSnapshot()
     private var bpm: Int? = null
@@ -74,36 +84,63 @@ class HomeViewModel internal constructor(
             } catch (_: Exception) {
                 DaySnapshot(DayBook(ZoneId.systemDefault().id, emptyList(), "Day metrics could not be read."), null, null)
             }
+            val rows = try {
+                activities.all()
+            } catch (_: Exception) {
+                emptyList()
+            }
             if (generation.get() != ticket) return@execute
             snapshot = loaded
-            if (selected == null) selected = initialDate(loaded.book, clock())
+            logged = rows
+            if (selected == null) selected = clock()
             publish()
         }
     }
 
-    fun previous() = move(-1)
-
-    fun next() = move(1)
-
-    private fun move(delta: Long) {
-        val current = selected ?: return
-        val bounds = bounds(snapshot.book, clock())
-        val target = current.plusDays(delta)
-        if (target < bounds.first || target > bounds.second) return
-        selected = target
+    /** Shows [date] from the book already in memory. Does not read the store. */
+    fun pick(date: LocalDate) {
+        selected = date
         publish()
+    }
+
+    fun backToToday() {
+        selected = clock()
+        publish()
+    }
+
+    fun saveActivity(id: Long?, type: String, start: LocalTime, end: LocalTime) {
+        val date = selected ?: return
+        val trimmed = type.trim()
+        if (trimmed.isEmpty() || start == end) return
+        val zone = zoneOf(snapshot.book.zone)
+        val startUnix = date.atTime(start).atZone(zone).toEpochSecond()
+        val endDate = if (end.isAfter(start)) date else date.plusDays(1)
+        val endUnix = endDate.atTime(end).atZone(zone).toEpochSecond()
+        if (endUnix <= startUnix) return
+        executor.execute {
+            activities.save(id, trimmed, startUnix, endUnix)
+            logged = activities.all()
+            publish()
+        }
+    }
+
+    fun deleteActivity(id: Long) {
+        executor.execute {
+            activities.delete(id)
+            logged = activities.all()
+            publish()
+        }
     }
 
     private fun publish() {
         val date = selected ?: return
-        val bounds = bounds(snapshot.book, clock())
         val zone = zoneOf(snapshot.book.zone)
         val day = snapshot.book.days.firstOrNull { it.date == date }
         _ui.value = homeContent(
             day = day,
             date = date,
-            canGoPrevious = date > bounds.first,
-            canGoNext = date < bounds.second,
+            today = clock(),
+            logged = logged,
             live = HomeLive(
                 bpm = bpm,
                 phase = linkState.phase,
@@ -118,16 +155,6 @@ class HomeViewModel internal constructor(
         link.unwatch(onLink)
         (executor as? ExecutorService)?.shutdown()
     }
-}
-
-internal fun initialDate(book: DayBook, today: LocalDate): LocalDate =
-    book.days.maxOfOrNull { it.date } ?: today
-
-internal fun bounds(book: DayBook, today: LocalDate): Pair<LocalDate, LocalDate> {
-    val stored = book.days.map { it.date }
-    val earliest = stored.minOrNull() ?: today
-    val latest = maxOf(stored.maxOrNull() ?: today, today)
-    return earliest to latest
 }
 
 internal fun shownBattery(link: LinkSnapshot, stored: Int?): Int? {

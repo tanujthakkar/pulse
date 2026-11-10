@@ -14,7 +14,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * decoder stamped them. New commits write the decoder's own version. Sessions
  * opened before version 4 keep a null snapshot; that is not a captured range.
  * Version 5 does not rewrite strap rows. Imported Edge rows live in the new
- * tables, each labeled `source` = `edge_import`.
+ * tables, each labeled `source` = `edge_import`. Version 6 adds
+ * `manual_activity` and does not rewrite earlier rows.
  */
 object PulseMigrations {
     val FROM_1_TO_2: Migration = object : Migration(1, 2) {
@@ -42,7 +43,22 @@ object PulseMigrations {
             EDGE_IMPORT_TABLES.forEach { sql -> db.execSQL(sql) }
         }
     }
+
+    val FROM_5_TO_6: Migration = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(MANUAL_ACTIVITY_TABLE)
+        }
+    }
 }
+
+/**
+ * Room's expected create statement for [ManualActivityRow].
+ *
+ * Auto-generated ids, a type, and an inclusive start with an exclusive end.
+ */
+internal const val MANUAL_ACTIVITY_TABLE: String =
+    "CREATE TABLE IF NOT EXISTS `manual_activity` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+        "`type` TEXT NOT NULL, `start_unix` INTEGER NOT NULL, `end_unix` INTEGER NOT NULL)"
 
 private val EDGE_IMPORT_TABLES: List<String> = listOf(
     "CREATE TABLE IF NOT EXISTS `edge_import_batch` (`id` TEXT NOT NULL, " +

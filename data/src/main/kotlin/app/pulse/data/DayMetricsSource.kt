@@ -7,8 +7,10 @@ import app.pulse.metrics.EdgeSleepWindow
 import app.pulse.metrics.SOURCE_EDGE
 import app.pulse.metrics.SOURCE_STRAP
 import app.pulse.metrics.SecondRecord
+import app.pulse.metrics.DayRules
 import app.pulse.metrics.computeDays
 import app.pulse.metrics.dayBookText
+import app.pulse.metrics.prepareWindow
 import java.time.ZoneId
 
 /**
@@ -49,6 +51,9 @@ interface DayMetricsSource {
 
     fun snapshot(zone: ZoneId = ZoneId.systemDefault()): DaySnapshot =
         DaySnapshot(DayBook(zone.id, emptyList(), null), null, null)
+
+    /** Strap and Edge seconds in [startUnix, endUnix), with strap winning a one-second overlap. */
+    fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> = emptyList()
 }
 
 class RoomDayMetrics(
@@ -62,6 +67,30 @@ class RoomDayMetrics(
     }
 
     override fun snapshot(zone: ZoneId): DaySnapshot = read(zone).snapshot
+
+    override fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> {
+        return try {
+            val pad = DayRules.STRAP_ALIGN_SECONDS
+            val queryStart = startUnix - pad
+            val queryEnd = endUnix + pad
+            val device = devices.latest()
+            val strap = if (device == null) {
+                emptyList()
+            } else {
+                database.samples().metricRowsBetween(device.address, queryStart, queryEnd).map { it.toSecondRecord() }
+            }
+            val imported = database.edgeImport()
+            val inputs = StoredDayInputs(
+                oneHz = imported.metricOneHzBetween(EDGE_IMPORT_SOURCE, queryStart * 1000L, queryEnd * 1000L),
+                rr = imported.metricRrBetween(EDGE_IMPORT_SOURCE, queryStart * 1000L, queryEnd * 1000L),
+                sleep = imported.metricSleep(EDGE_IMPORT_SOURCE),
+            )
+            val assembly = assembleDays(strap, inputs)
+            prepareWindow(assembly.records, assembly.windows, startUnix, endUnix)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     private fun read(zone: ZoneId): DayRead {
         return try {

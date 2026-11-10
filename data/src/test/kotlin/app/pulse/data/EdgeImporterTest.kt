@@ -356,7 +356,7 @@ class EdgeImporterTest {
         helper.close()
 
         val room = Room.databaseBuilder(context, PulseDatabase::class.java, MIGRATED)
-            .addMigrations(PulseMigrations.FROM_4_TO_5)
+            .addMigrations(PulseMigrations.FROM_4_TO_5, PulseMigrations.FROM_5_TO_6)
             .allowMainThreadQueries()
             .build()
         assertEquals("50.42.1.0", room.devices().latest()?.helloFirmware)
