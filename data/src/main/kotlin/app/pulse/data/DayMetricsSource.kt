@@ -93,6 +93,7 @@ class RoomDayMetrics(
     private var cachedZone: String? = null
     private var cachedDays: List<DayResult> = emptyList()
     private var cachedStrapMin: Long? = null
+    private var cachedThrough: Long = Long.MIN_VALUE
 
     override fun report(zone: ZoneId): String = dayBookText(snapshot(zone).book)
 
@@ -194,6 +195,7 @@ class RoomDayMetrics(
         ) {
             cachedDays = emptyList()
             cachedStrapMin = null
+            cachedThrough = Long.MIN_VALUE
             return DaySnapshot(
                 DayBook(zone.id, emptyList(), "No device row is stored."),
                 batteryPercent(device),
@@ -208,9 +210,17 @@ class RoomDayMetrics(
             zone = zone,
             scoreDayIds = scores.map { it.dayId },
         )
+        val edgeMax = imported.maxOneHz(EDGE_IMPORT_SOURCE)?.let { epochSeconds(it) }
+        val dataThrough = listOfNotNull(strapMax, edgeMax).maxOrNull() ?: Long.MIN_VALUE
         val keep = if (cachedStrapMin == strapMin && cachedZone == zone.id) cachedDays else emptyList()
         val keptDates = keep.map { it.date }.toSet()
-        val freshDates = datesToRecompute(dates, keptDates)
+        val freshDates = datesToRecompute(
+            dates,
+            keptDates,
+            zone,
+            cachedThrough = if (keep.isEmpty()) Long.MIN_VALUE else cachedThrough,
+            dataThrough = dataThrough,
+        )
         val kept = keep.filter { it.date !in freshDates }
         val fresh = daysByWindow(
             zone = zone,
@@ -239,6 +249,7 @@ class RoomDayMetrics(
         val days = (kept + fresh).sortedByDescending { it.date }
         cachedDays = days
         cachedStrapMin = strapMin
+        cachedThrough = dataThrough
         val book = if (days.isEmpty()) {
             DayBook(zone.id, emptyList(), "No layout-18 or Edge one-second rows are stored.")
         } else {

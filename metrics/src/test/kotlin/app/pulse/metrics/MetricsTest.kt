@@ -65,8 +65,11 @@ class MetricsTest {
         val first = book.days.first { it.date == LocalDate.of(2026, 5, 1) }
         val second = book.days.first { it.date == LocalDate.of(2026, 5, 2) }
         assertNull(first.main)
+        assertTrue(first.episodes.isEmpty())
         assertEquals(3600, first.sleepSeconds)
         assertEquals(10_800, second.main!!.sleepSeconds)
+        assertEquals(1, second.episodes.size)
+        assertEquals(10_800, second.episodes.single().sleepSeconds)
         assertEquals(LocalDate.of(2026, 5, 2), second.main.endDate)
     }
 

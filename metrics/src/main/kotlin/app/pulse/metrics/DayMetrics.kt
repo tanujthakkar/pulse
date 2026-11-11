@@ -3,6 +3,7 @@ package app.pulse.metrics
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.exp
@@ -500,8 +501,9 @@ private fun dayResult(
     val qualifying = mergeSleepEpisodes(
         overlapping.filter { it.sleepSeconds >= DayRules.MIN_SLEEP_SECONDS },
     )
-    val short = overlapping.filter { it.sleepSeconds < DayRules.MIN_SLEEP_SECONDS }
-    val main = qualifying.filter { it.endDate == date }.maxWithOrNull(compareBy({ it.sleepSeconds }, { it.spanSeconds }))
+    val short = overlapping.filter { it.sleepSeconds < DayRules.MIN_SLEEP_SECONDS && it.endDate == date }
+    val waking = qualifying.filter { it.endDate == date }
+    val main = waking.maxWithOrNull(compareBy({ it.sleepSeconds }, { it.spanSeconds }))
     val rhythm = main?.let { measure(samples, it) }
     val prior = episodes
         .filter { it.endDate < date && it.sleepSeconds >= DayRules.MIN_SLEEP_SECONDS }
@@ -549,7 +551,7 @@ private fun dayResult(
         sleepSeconds = mine.count { it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep },
         shortEpisodes = short.size,
         shortSleepSeconds = short.sumOf { it.sleepSeconds },
-        episodes = qualifying,
+        episodes = waking,
         main = main,
         rhythm = rhythm,
         recovery = if (main == null) null else recovery,
@@ -805,15 +807,39 @@ fun mergeSleepEpisodes(episodes: List<SleepEpisode>): List<SleepEpisode> {
 /**
  * Dates still worth reading after a forward history sync.
  *
- * Earlier days stay in [cached]. The latest day and the day before it are
- * read again, because a night crosses midnight and a partial evening row has
- * to be replaced once the rest of that night is stored.
+ * The latest day and the day before it are always read again. An earlier day
+ * is read again when [dataThrough] moved past [cachedThrough] and that older
+ * read had not yet seen the end of its window. A night that starts in the
+ * evening is stored on the wake day, so the start day has to be rebuilt once
+ * the morning samples exist.
  */
-fun datesToRecompute(dates: List<LocalDate>, cached: Set<LocalDate>): List<LocalDate> {
+fun datesToRecompute(
+    dates: List<LocalDate>,
+    cached: Set<LocalDate>,
+    zone: ZoneId = ZoneOffset.UTC,
+    cachedThrough: Long = Long.MAX_VALUE,
+    dataThrough: Long = Long.MAX_VALUE,
+): List<LocalDate> {
     if (dates.isEmpty()) return emptyList()
     val earliestFresh = dates.last().minusDays(1)
-    return dates.filter { it >= earliestFresh || it !in cached }
+    return dates.filter { date ->
+        val uncovered = dataThrough > cachedThrough && cachedThrough < dayWindowEnd(date, zone)
+        date >= earliestFresh || date !in cached || uncovered
+    }
 }
+
+/** Noon on the previous day. Covers a night that ends this morning. */
+fun dayWindowStart(date: LocalDate, zone: ZoneId): Long =
+    date.minusDays(1).atTime(12, 0).atZone(zone).toEpochSecond()
+
+/**
+ * Start of the day after tomorrow.
+ *
+ * Exclusive. A night that starts this evening and ends any time tomorrow stays
+ * one episode instead of being cut at midnight.
+ */
+fun dayWindowEnd(date: LocalDate, zone: ZoneId): Long =
+    date.plusDays(2).atStartOfDay(zone).toEpochSecond()
 
 /**
  * Qualifying main-sleep rhythms, newest first, capped at [DayRules.BASELINE_DAYS].
@@ -836,9 +862,10 @@ fun baselineRhythms(days: List<DayResult>): List<Rhythm> {
 /**
  * One local day at a time, then the samples for that day can be dropped.
  *
- * [loadWindow] is asked for the previous noon through the next midnight, which
- * covers a night that started the evening before. Recovery uses [priorRhythms]
- * (newest first) instead of measuring those older nights again.
+ * [loadWindow] is asked for [dayWindowStart] through [dayWindowEnd]. That span
+ * includes the previous evening and the whole of the next day, so a sleep is
+ * measured through its wake time and assigned to that morning. Recovery uses
+ * [priorRhythms] (newest first) instead of measuring those older nights again.
  */
 fun daysByWindow(
     zone: ZoneId,
@@ -852,8 +879,8 @@ fun daysByWindow(
     priors += priorRhythms
     val days = ArrayList<DayResult>()
     for (date in dates.sorted()) {
-        val start = date.minusDays(1).atTime(12, 0).atZone(zone).toEpochSecond()
-        val end = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
+        val start = dayWindowStart(date, zone)
+        val end = dayWindowEnd(date, zone)
         val window = loadWindow(start, end)
         val computed = computeDays(window, zone, edgeWindows, edgeScores).days.firstOrNull { it.date == date }
             ?: continue

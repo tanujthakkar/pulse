@@ -33,6 +33,22 @@ class DayWindowTest {
     }
 
     @Test
+    fun anEarlierDayIsRereadOnceTheRestOfItsNightArrives() {
+        val dates = (8..10).map { LocalDate.of(2026, 11, it) }
+        val monday = LocalDate.of(2026, 11, 9)
+        val windowEnd = dayWindowEnd(monday, ZoneOffset.UTC)
+        val fresh = datesToRecompute(
+            dates,
+            dates.toSet(),
+            ZoneOffset.UTC,
+            cachedThrough = windowEnd - 3600,
+            dataThrough = windowEnd + 3600,
+        )
+        assertTrue(fresh.contains(monday))
+        assertEquals(false, fresh.contains(LocalDate.of(2026, 11, 8)))
+    }
+
+    @Test
     fun threePriorNightsScoreRecoveryWithoutReadingSamples() {
         val earlier = Rhythm(400, 300, 250, 40.0, 200, 50, 52.0)
         val today = earlier.copy(rmssdMs = 50.0, restingHr = 48)
