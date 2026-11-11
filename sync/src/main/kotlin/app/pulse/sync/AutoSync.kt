@@ -21,6 +21,14 @@ object AutoSync {
     const val FOREGROUND_COOLDOWN_MS: Long = 60_000L
 
     const val WORK_NAME: String = "pulse-history-sync"
+
+    /**
+     * How long the fallback worker may block while one history attempt runs.
+     *
+     * A normal simulated night is longer than a minute. The worker used to
+     * return success as soon as the attempt started, before any history frame.
+     */
+    const val WORKER_WAIT_MS: Long = 10L * 60L * 1000L
 }
 
 enum class AutoSyncTrigger {
@@ -49,6 +57,10 @@ enum class AutoSyncOutcome {
     RECONNECTING,
     NOT_READY,
     IDLE,
+    /** The history attempt this worker waited for saw metadata complete. */
+    FINISHED,
+    /** The attempt ended another way, or the wait timed out. */
+    FAILED,
 }
 
 data class AutoSyncInput(

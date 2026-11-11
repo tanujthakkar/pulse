@@ -67,7 +67,12 @@ class SimulatedStrapEngineTest {
     @Test
     fun layout18CarriesHeartRateRrStepsAndSleep() {
         val history = SyntheticHistory(today, ZoneOffset.UTC)
-        assertEquals(4 * SyntheticHistory.DAY_MINUTES + 3 * SyntheticHistory.NIGHT_SECONDS, history.total)
+        assertEquals(
+            SyntheticHistory.DAY_COUNT * SyntheticHistory.DAY_MINUTES +
+                SyntheticHistory.NIGHT_COUNT * SyntheticHistory.NIGHT_SECONDS,
+            history.total,
+        )
+        assertTrue(SyntheticHistory.NIGHT_COUNT >= 14)
         val day = decode(history.frame(0))
         assertEquals(BandMotion.STILL, day.reading.bandState)
         assertTrue(day.reading.heartRateBpm!! in 25..230)

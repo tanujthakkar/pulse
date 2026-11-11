@@ -92,6 +92,23 @@ class AutoSyncCoordinator @Inject constructor(
      * That used to be recorded as a start, so later workers returned success
      * during the cooldown without ever syncing.
      */
+    /**
+     * Runs the worker trigger and, when that starts or joins a history attempt,
+     * waits until the attempt finishes.
+     *
+     * The result is not [AutoSyncOutcome.STARTED]. Callers that only need to
+     * kick a sync, such as a connect, still use [on].
+     */
+    fun runWorker(): AutoSyncOutcome {
+        val started = on(AutoSyncTrigger.WORKER)
+        if (started != AutoSyncOutcome.STARTED && started != AutoSyncOutcome.IN_PROGRESS) return started
+        return settleWorkerSync(
+            running = { sync.running.value },
+            outcome = { sync.activity.value.outcome },
+            watch = { listener -> sync.watch(listener) },
+        )
+    }
+
     fun on(trigger: AutoSyncTrigger): AutoSyncOutcome {
         return when (autoSyncAction(current(trigger))) {
             AutoSyncAction.SYNC -> {

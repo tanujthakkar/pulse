@@ -39,8 +39,42 @@ class AutoSyncStartTest {
     fun workerRetriesWhenTheStrapIsNotReadyAndSucceedsOnceASyncStarts() {
         assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.NOT_READY))
         assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.RECONNECTING))
-        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.IN_PROGRESS))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.FAILED))
+        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.FINISHED))
         assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.IDLE))
+    }
+
+    @Test
+    fun theWorkerWaitsUntilTheHistoryAttemptCompletes() {
+        var running = true
+        var outcome: app.pulse.sync.SessionOutcome? = null
+        val listeners = mutableListOf<() -> Unit>()
+        var settled: AutoSyncOutcome? = null
+        val thread = Thread {
+            settled = settleWorkerSync(
+                running = { running },
+                outcome = { outcome },
+                watch = { listener ->
+                    listeners.add(listener)
+                    listener.invoke()
+                    val remove: () -> Unit = { listeners.remove(listener) }
+                    remove
+                },
+                timeoutMs = 2_000,
+            )
+        }
+        thread.start()
+        Thread.sleep(150)
+        assertTrue(thread.isAlive)
+        assertEquals(null, settled)
+        running = false
+        outcome = app.pulse.sync.SessionOutcome.COMPLETE
+        listeners.toList().forEach { it() }
+        thread.join(2_000)
+        assertFalse(thread.isAlive)
+        assertEquals(AutoSyncOutcome.FINISHED, settled)
     }
 
     @Test

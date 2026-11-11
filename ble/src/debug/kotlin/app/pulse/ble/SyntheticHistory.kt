@@ -13,10 +13,11 @@ import kotlin.math.sin
 /**
  * Layout-18 history generated from [SEED].
  *
- * Four local days of one-minute daytime samples, and three nights of one
- * sample per second. Sleep duration on the home screen is the number of
- * sleep samples, so a night is stored at 1 Hz. Nothing here is copied from
- * a person's strap.
+ * Fifteen local days of one-minute daytime samples, and fourteen nights of
+ * one sample per second. Recovery needs three earlier qualifying nights, so
+ * three nights left today blank. Sleep duration on the home screen is the
+ * number of sleep samples, so a night is stored at 1 Hz. Nothing here is
+ * copied from a person's strap.
  */
 internal class SyntheticHistory(
     private val today: LocalDate,
@@ -40,13 +41,11 @@ internal class SyntheticHistory(
             add(Segment(cursor, count, kind, day, stepDay))
             cursor += count
         }
-        add(Kind.DAY, today.minusDays(3), DAY_MINUTES, 0)
-        add(Kind.NIGHT, today.minusDays(2), NIGHT_SECONDS, 0)
-        add(Kind.DAY, today.minusDays(2), DAY_MINUTES, 1)
-        add(Kind.NIGHT, today.minusDays(1), NIGHT_SECONDS, 1)
-        add(Kind.DAY, today.minusDays(1), DAY_MINUTES, 2)
-        add(Kind.NIGHT, today, NIGHT_SECONDS, 2)
-        add(Kind.DAY, today, DAY_MINUTES, 3)
+        for (index in 0 until DAY_COUNT) {
+            val day = today.minusDays((DAY_COUNT - 1 - index).toLong())
+            add(Kind.DAY, day, DAY_MINUTES, index)
+            if (index < NIGHT_COUNT) add(Kind.NIGHT, day.plusDays(1), NIGHT_SECONDS, index)
+        }
     }
 
     val total: Int = segments.sumOf { it.count }
@@ -130,7 +129,8 @@ internal class SyntheticHistory(
         const val NIGHT_SECONDS: Int = 7 * 3600
         const val DAY_START_HOUR: Int = 7
         const val DAY_MINUTES: Int = 15 * 60
-        const val DAY_COUNT: Int = 4
+        const val DAY_COUNT: Int = 15
+        const val NIGHT_COUNT: Int = 14
         const val RECORD_BODY: Int = 109
         const val CHUNK_RECORDS: Int = 1000
 

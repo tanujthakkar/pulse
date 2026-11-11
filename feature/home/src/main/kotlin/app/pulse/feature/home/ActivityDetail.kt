@@ -98,7 +98,14 @@ internal fun loadActivityDetail(
         } else {
             sleepRhythm(records, start, end, episode?.edgeProvided == true)
         }
-        return sleepDetail(start, end, zone, rhythm, episode?.edgeProvided == true)
+        return sleepDetail(
+            start,
+            end,
+            zone,
+            rhythm,
+            episode?.edgeProvided == true,
+            asleepSeconds(episode?.sleepSeconds, start, end),
+        )
     }
     val date = Instant.ofEpochSecond(start).atZone(zone).toLocalDate()
     val resting = snapshot.book.days.firstOrNull { it.date == date }?.rhythm?.restingHr
@@ -133,6 +140,7 @@ fun sleepDetail(
     zone: ZoneId,
     rhythm: Rhythm?,
     edgeProvided: Boolean,
+    asleepSeconds: Long = (end - start).coerceAtLeast(0L),
 ): ActivityDetail {
     val onset = clock(start, zone) + if (edgeProvided) " · Edge-provided" else ""
     val hrv = rhythm?.rmssdMs?.let { "${it.roundToInt()} ms" } ?: "—"
@@ -140,7 +148,7 @@ fun sleepDetail(
     return ActivityDetail(
         title = "Sleep",
         rows = listOf(
-            "Duration" to formatDuration((end - start).coerceAtLeast(0L)),
+            "Duration" to formatDuration(asleepSeconds),
             "Onset" to onset,
             "Offset" to clock(end, zone),
             "HRV" to hrv,

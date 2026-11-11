@@ -5,6 +5,7 @@ import app.pulse.metrics.ActivityCard
 import app.pulse.metrics.ActivityKind
 import app.pulse.metrics.DayResult
 import app.pulse.metrics.DayRules
+import app.pulse.metrics.Recovery
 import app.pulse.metrics.LoggedActivity
 import app.pulse.metrics.activityTimeline
 import app.pulse.metrics.approximateStrain21
@@ -31,6 +32,8 @@ data class SummaryRingModel(
     val progress: Float,
     val tone: DialTone,
     val gradient: Boolean,
+    /** Shown under the title when the ring has no score yet. */
+    val caption: String? = null,
 )
 
 data class HomeLive(
@@ -239,7 +242,7 @@ internal fun activitiesFor(
     return activityTimeline(sleep, manual).map { card ->
         val episode = sleep.firstOrNull { it.startUnix == card.startUnix }
         val tile = if (card.kind == ActivityKind.SLEEP) {
-            formatHm((episode?.sleepSeconds ?: (card.endUnix - card.startUnix)).toLong())
+            formatDuration(asleepSeconds(episode?.sleepSeconds, card.startUnix, card.endUnix))
         } else {
             strains[card.startUnix] ?: "--"
         }
@@ -256,7 +259,8 @@ internal fun activitiesFor(
 
 private fun recoveryRing(day: DayResult?, noSeconds: Boolean): SummaryRingModel {
     val score = day?.recovery?.score
-    if (noSeconds || day?.main == null || score == null) return blankRing("Recovery")
+    if (noSeconds || day?.main == null) return blankRing("Recovery")
+    if (score == null) return blankRing("Recovery").copy(caption = recoveryCaption(day.recovery))
     val (value, tone) = recoveryRingDisplay(score)
     return SummaryRingModel(
         title = "Recovery",
@@ -292,6 +296,31 @@ private fun sleepRing(day: DayResult?, noSeconds: Boolean): SummaryRingModel {
         tone = DialTone.PURPLE,
         gradient = true,
     )
+}
+
+/**
+ * Why a finished night still has no recovery percent.
+ *
+ * The score needs [DayRules.MIN_BASELINE_DAYS] earlier nights with enough
+ * heart-rate intervals. Fewer than that is calibration, not a missing night.
+ */
+internal fun recoveryCaption(recovery: Recovery?): String {
+    val missing = DayRules.MIN_BASELINE_DAYS - (recovery?.baselineDays ?: 0)
+    if (missing <= 0) return "Calibrating"
+    val nights = if (missing == 1) "night" else "nights"
+    return "Calibrating, $missing more $nights"
+}
+
+/**
+ * Seconds asleep for a row and its detail page.
+ *
+ * [sleepSeconds] counts stored sleep samples. The episode's last sample is
+ * an inclusive timestamp, so the wall span [endUnix] - [startUnix] is one
+ * second short of that count. Both places use the sample count.
+ */
+internal fun asleepSeconds(sleepSeconds: Int?, startUnix: Long, endUnix: Long): Long {
+    sleepSeconds?.let { return it.toLong().coerceAtLeast(0L) }
+    return (endUnix - startUnix).coerceAtLeast(0L)
 }
 
 private fun blankRing(title: String) = SummaryRingModel(
@@ -439,24 +468,20 @@ internal fun formatTempDelta(delta: Double): String {
 }
 
 internal fun formatDuration(seconds: Long): String {
-    val whole = seconds.coerceAtLeast(0L)
-    val hours = whole / 3600
-    val minutes = (whole % 3600) / 60
+    val (hours, minutes) = durationParts(seconds)
     return "${hours}h ${minutes}m"
 }
 
-internal fun formatHm(seconds: Long): String {
+private fun durationParts(seconds: Long): Pair<Long, Long> {
     val whole = seconds.coerceAtLeast(0L)
     val hours = whole / 3600
     val minutes = (whole % 3600) / 60
-    return "$hours:${minutes.toString().padStart(2, '0')}"
+    return hours to minutes
 }
 
 internal fun formatSignedHm(seconds: Int): String {
     val sign = if (seconds < 0) "-" else ""
-    val whole = abs(seconds)
-    val hours = whole / 3600
-    val minutes = (whole % 3600) / 60
+    val (hours, minutes) = durationParts(abs(seconds).toLong())
     return "$sign$hours:${minutes.toString().padStart(2, '0')}"
 }
 

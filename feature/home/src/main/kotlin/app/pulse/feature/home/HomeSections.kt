@@ -189,6 +189,17 @@ fun SummaryRing(
             )
             PulseIcon(PulseMark.CHEVRON, PulsePalette.muted, Modifier.size(10.dp))
         }
+        val caption = model.caption
+        if (caption != null) {
+            Text(
+                caption,
+                color = PulsePalette.muted,
+                fontSize = 10.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 12.sp,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 

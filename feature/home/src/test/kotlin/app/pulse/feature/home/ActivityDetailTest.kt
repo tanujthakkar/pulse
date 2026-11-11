@@ -62,6 +62,41 @@ class ActivityDetailTest {
     }
 
     @Test
+    fun sleepBadgeAndDetailShareTheSampleCountForAnInclusiveNight() {
+        val zone = ZoneOffset.UTC
+        val start = LocalDate.of(2026, 11, 8).atTime(23, 0).toEpochSecond(zone)
+        val asleep = 7 * 3600
+        val end = start + asleep - 1
+        val date = LocalDate.of(2026, 11, 9)
+        val episode = SleepEpisode(start, end, asleep, asleep.toLong(), date)
+        val stored = day(date, start).copy(
+            episodes = listOf(episode),
+            main = episode,
+            sleepSeconds = asleep,
+            strapSeconds = asleep,
+        )
+        val content = homeContent(
+            day = stored,
+            date = date,
+            today = date,
+            logged = emptyList(),
+            live = HomeLive(bpm = null, batteryPercent = null, lastSyncUnixSeconds = null, zone = zone),
+        )
+        val tile = content.activities.single().tile
+        val detail = sleepDetail(
+            start,
+            end,
+            zone,
+            stored.rhythm,
+            false,
+            asleepSeconds(episode.sleepSeconds, start, end),
+        )
+        assertEquals("6h 59m", formatDuration(end - start))
+        assertEquals("7h 0m", tile)
+        assertEquals(tile, detail.rows.first { it.first == "Duration" }.second)
+    }
+
+    @Test
     fun theLoaderUsesTheDaysRestingHeartRate() {
         val zone = ZoneOffset.UTC
         val date = LocalDate.of(2026, 11, 8)

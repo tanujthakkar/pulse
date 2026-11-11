@@ -112,6 +112,10 @@ class SimulatedHistorySyncTest {
         assertTrue(book.days.count { it.main != null } >= 2)
         assertTrue(book.days.any { it.stepIncrease > 0 })
         assertTrue(book.days.any { it.rhythm?.restingHr != null })
+        val today = book.days.first { it.date == LocalDate.of(2026, 11, 8) }
+        assertTrue(today.main != null)
+        assertTrue((today.recovery?.baselineDays ?: 0) >= 3)
+        assertTrue(today.recovery?.score != null)
     }
 
     private var engineRef: HistorySyncEngine? = null

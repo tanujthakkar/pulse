@@ -20,6 +20,7 @@ import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,11 @@ import kotlinx.coroutines.launch
  * from the book already loaded and does not read it again. Adding an activity
  * writes the activity row only.
  *
+ * A history sync used to finish while this screen still showed the empty book
+ * from startup. [DayMetricsSource.watch] fires when those rows commit, and
+ * the next quiet moment reads the book again. My Day, the Dashboard, and
+ * Health Monitor all render that same read.
+ *
  * This does not send strap commands. Live bpm is whatever the open session
  * has already published on the standard heart-rate measurement. The trace is
  * the last few minutes of those samples, kept in memory only.
@@ -46,6 +52,8 @@ class HomeViewModel internal constructor(
     private val heart: LiveHeartRateFeed,
     private val clock: () -> LocalDate,
     private val executor: Executor,
+    private val debounceMs: Long = RELOAD_QUIET_MS,
+    private val collectHeart: Boolean = true,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -56,6 +64,8 @@ class HomeViewModel internal constructor(
     ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor())
 
     private val generation = AtomicInteger()
+    private val reloadTicket = AtomicInteger()
+    private val reloadQueued = AtomicBoolean(false)
     private val _ui = MutableStateFlow<HomeContent?>(null)
     val ui: StateFlow<HomeContent?> = _ui.asStateFlow()
 
@@ -71,25 +81,61 @@ class HomeViewModel internal constructor(
         publish()
     }
 
+    private val stopDays: () -> Unit
+
     init {
         bpm = heart.latest.value?.bpm
         trace = heart.recent().map { HeartPoint(it.tsMillis, it.bpm) }
         link.watch(onLink)
-        viewModelScope.launch {
-            heart.latest.collect { sample ->
-                bpm = sample?.bpm
-                if (sample == null) trace = emptyList()
-                publish()
+        if (collectHeart) {
+            viewModelScope.launch {
+                heart.latest.collect { sample ->
+                    bpm = sample?.bpm
+                    if (sample == null) trace = emptyList()
+                    publish()
+                }
             }
-        }
-        viewModelScope.launch {
-            heart.samples.collect { sample ->
-                bpm = sample.bpm
-                trace = heart.recent().map { HeartPoint(it.tsMillis, it.bpm) }
-                publish()
+            viewModelScope.launch {
+                heart.samples.collect { sample ->
+                    bpm = sample.bpm
+                    trace = heart.recent().map { HeartPoint(it.tsMillis, it.bpm) }
+                    publish()
+                }
             }
         }
         refresh()
+        stopDays = days.watch { onDaysChanged() }
+    }
+
+    /**
+     * Coalesces a burst of sample commits into one read after [debounceMs] of quiet.
+     *
+     * A history sync inserts a row many times a second. Reading the whole book
+     * on each insert would stack behind the sync. The read runs once the writes pause.
+     */
+    private fun onDaysChanged() {
+        reloadTicket.incrementAndGet()
+        if (!reloadQueued.compareAndSet(false, true)) return
+        executor.execute {
+            var pending = true
+            while (pending) {
+                val seen = reloadTicket.get()
+                if (debounceMs > 0) {
+                    try {
+                        Thread.sleep(debounceMs)
+                    } catch (_: InterruptedException) {
+                        reloadQueued.set(false)
+                        pending = false
+                        continue
+                    }
+                }
+                if (reloadTicket.get() != seen) continue
+                reloadQueued.set(false)
+                if (reloadTicket.get() != seen && reloadQueued.compareAndSet(false, true)) continue
+                refresh()
+                pending = false
+            }
+        }
     }
 
     fun refresh() {
@@ -197,8 +243,13 @@ class HomeViewModel internal constructor(
     }
 
     override fun onCleared() {
+        stopDays()
         link.unwatch(onLink)
         (executor as? ExecutorService)?.shutdown()
+    }
+
+    private companion object {
+        const val RELOAD_QUIET_MS: Long = 400
     }
 }
 

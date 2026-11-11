@@ -71,7 +71,7 @@ class HomeScreenTest {
         shows("dash_sleep_debt", "8h reference")
         assertEquals(0, compose.onAllNodesWithTag("dash_avg_hr").fetchSemanticsNodes().size)
         shows("activity_$SLEEP_START", "SLEEP")
-        shows("activity_$SLEEP_START", "7:30")
+        shows("activity_$SLEEP_START", "7h 30m")
         compose.onNodeWithTag("home_next").assertIsNotEnabled()
         compose.onNodeWithTag("home_prev").performClick()
         assertEquals(listOf(DATE.minusDays(1)), picks)
@@ -99,6 +99,7 @@ class HomeScreenTest {
         compose.setContent { host(content) }
         shows("home_recovery", "--")
         shows("home_recovery", "RECOVERY")
+        shows("home_recovery", "Calibrating, 2 more nights")
         shows("home_strain", "13.3")
     }
 

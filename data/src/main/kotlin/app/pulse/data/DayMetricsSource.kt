@@ -1,6 +1,7 @@
 package app.pulse.data
 
 import androidx.room.ColumnInfo
+import androidx.room.InvalidationTracker
 import app.pulse.metrics.DayBook
 import app.pulse.metrics.EdgeDayNote
 import app.pulse.metrics.EdgeSleepWindow
@@ -53,6 +54,15 @@ interface DayMetricsSource {
     fun snapshot(zone: ZoneId = ZoneId.systemDefault()): DaySnapshot =
         DaySnapshot(DayBook(zone.id, emptyList(), null), null, null)
 
+    /**
+     * Calls [onChange] after a commit to the tables home reads.
+     *
+     * The callback is not invoked for the current rows. A sync that inserts
+     * layout-18 samples fires it when that transaction commits. The returned
+     * function removes the observer.
+     */
+    fun watch(onChange: () -> Unit): () -> Unit = {}
+
     /** Strap and Edge seconds in [startUnix, endUnix), with strap winning a one-second overlap. */
     fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> = emptyList()
 }
@@ -68,6 +78,25 @@ class RoomDayMetrics(
     }
 
     override fun snapshot(zone: ZoneId): DaySnapshot = read(zone).snapshot
+
+    override fun watch(onChange: () -> Unit): () -> Unit {
+        val observer = object : InvalidationTracker.Observer(
+            "r18_sample",
+            "sync_session",
+            "device_battery",
+            "edge_onehz",
+            "edge_rr",
+            "edge_sleep",
+            "edge_day_score",
+            "manual_activity",
+        ) {
+            override fun onInvalidated(tables: Set<String>) {
+                onChange()
+            }
+        }
+        database.invalidationTracker.addObserver(observer)
+        return { database.invalidationTracker.removeObserver(observer) }
+    }
 
     override fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> {
         return try {
