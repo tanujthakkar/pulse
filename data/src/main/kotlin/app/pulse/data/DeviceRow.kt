@@ -82,8 +82,8 @@ class RoomDeviceDirectory(
     private val database: PulseDatabase,
 ) : DeviceDirectory {
     override fun save(row: DeviceRow) {
-        database.devices().upsert(row)
+        DbWork.call { database.devices().upsert(row) }
     }
 
-    override fun latest(): DeviceRow? = database.devices().latest()
+    override fun latest(): DeviceRow? = DbWork.call { database.devices().latest() }
 }

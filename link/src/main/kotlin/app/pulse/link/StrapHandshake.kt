@@ -18,6 +18,7 @@ import app.pulse.wire.codec.RequestTracker
 import app.pulse.wire.codec.toCommandResponse
 import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -39,8 +40,8 @@ internal class StrapHandshake(
     private val report: (DeviceReport) -> Unit,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val log: (String) -> Unit = {},
+    private val runner: HandshakeRunner = HandshakeRunner(),
 ) {
-    private val runner = HandshakeRunner()
     private val tracker = RequestTracker()
     private val connection = ConnectionId(NEXT_CONNECTION.incrementAndGet())
     private val incoming = StrapGatt.NOTIFY.associateWith { FrameAccumulator() }
@@ -240,11 +241,29 @@ internal class StrapHandshake(
     }
 }
 
-private class HandshakeRunner {
+/**
+ * Serializes handshake steps.
+ *
+ * The default runs on the caller. The live link passes a single background
+ * thread so a GATT callback, including the simulator's main-thread radio,
+ * only enqueues the step. Device writes then run on the database thread.
+ */
+internal class HandshakeRunner(
+    private val executor: Executor? = null,
+) {
     private val queue = ArrayDeque<() -> Unit>()
     private var draining = false
 
     fun execute(task: () -> Unit) {
+        val target = executor
+        if (target == null) {
+            drain(task)
+            return
+        }
+        target.execute { drain(task) }
+    }
+
+    private fun drain(task: () -> Unit) {
         queue.add(task)
         if (draining) return
         draining = true

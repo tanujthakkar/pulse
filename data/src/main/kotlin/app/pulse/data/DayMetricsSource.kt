@@ -137,8 +137,8 @@ class RoomDayMetrics(
                 onChange()
             }
         }
-        database.invalidationTracker.addObserver(observer)
-        return { database.invalidationTracker.removeObserver(observer) }
+        DbWork.call { database.invalidationTracker.addObserver(observer) }
+        return { DbWork.call { database.invalidationTracker.removeObserver(observer) } }
     }
 
     override fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> {

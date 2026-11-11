@@ -16,16 +16,20 @@ object DataBindings {
     @Provides
     @Singleton
     fun pulseDatabase(@ApplicationContext context: Context): PulseDatabase {
-        // Callers read and write this database off the main thread.
-        return Room.databaseBuilder(context, PulseDatabase::class.java, PulseStoreFiles.name(context))
-            .addMigrations(
-                PulseMigrations.FROM_1_TO_2,
-                PulseMigrations.FROM_2_TO_3,
-                PulseMigrations.FROM_3_TO_4,
-                PulseMigrations.FROM_4_TO_5,
-                PulseMigrations.FROM_5_TO_6,
-            )
-            .build()
+        val app = context.applicationContext
+        // Open the file off the thread that builds the graph. Startup injects
+        // this on the main thread, and the first open reads the store name.
+        return DbWork.call {
+            Room.databaseBuilder(app, PulseDatabase::class.java, PulseStoreFiles.name(app))
+                .addMigrations(
+                    PulseMigrations.FROM_1_TO_2,
+                    PulseMigrations.FROM_2_TO_3,
+                    PulseMigrations.FROM_3_TO_4,
+                    PulseMigrations.FROM_4_TO_5,
+                    PulseMigrations.FROM_5_TO_6,
+                )
+                .build()
+        }
     }
 
     @Provides

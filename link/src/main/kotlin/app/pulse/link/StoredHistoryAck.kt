@@ -1,12 +1,17 @@
 package app.pulse.link
 
 import android.content.Context
+import android.content.SharedPreferences
 import app.pulse.sync.HistoryAckEnabled
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,15 +26,30 @@ import javax.inject.Singleton
 class StoredHistoryAck @Inject constructor(
     @ApplicationContext context: Context,
 ) : HistoryAckEnabled {
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val opening = PREFS_EXECUTOR.submit(
+        Callable {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        },
+    )
 
-    override fun enabled(): Boolean = prefs.getBoolean(KEY, true)
+    private fun prefs(): SharedPreferences {
+        try {
+            return opening.get()
+        } catch (error: ExecutionException) {
+            throw error.cause ?: error
+        }
+    }
+
+    override fun enabled(): Boolean = prefs().getBoolean(KEY, true)
 
     override fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY, enabled).commit()
+        prefs().edit().putBoolean(KEY, enabled).apply()
     }
 
     private companion object {
+        val PREFS_EXECUTOR: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "pulse-ack").apply { isDaemon = true }
+        }
         const val PREFS: String = "pulse.history_ack"
         const val KEY: String = "enabled"
     }

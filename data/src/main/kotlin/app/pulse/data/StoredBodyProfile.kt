@@ -1,10 +1,15 @@
 package app.pulse.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import app.pulse.metrics.BodyProfile
 import app.pulse.metrics.Sex
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,24 +23,37 @@ import javax.inject.Singleton
 class StoredBodyProfile @Inject constructor(
     @ApplicationContext context: Context,
 ) {
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val opening = PREFS_EXECUTOR.submit(
+        Callable {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        },
+    )
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
 
+    private fun prefs(): SharedPreferences {
+        try {
+            return opening.get()
+        } catch (error: ExecutionException) {
+            throw error.cause ?: error
+        }
+    }
+
     fun current(): BodyProfile? {
-        val sex = prefs.getString(SEX, null)?.let { runCatching { Sex.valueOf(it) }.getOrNull() } ?: return null
-        if (!prefs.contains(AGE) || !prefs.contains(HEIGHT) || !prefs.contains(WEIGHT)) return null
+        val stored = prefs()
+        val sex = stored.getString(SEX, null)?.let { runCatching { Sex.valueOf(it) }.getOrNull() } ?: return null
+        if (!stored.contains(AGE) || !stored.contains(HEIGHT) || !stored.contains(WEIGHT)) return null
         val profile = BodyProfile(
             sex = sex,
-            ageYears = prefs.getInt(AGE, 0),
-            heightCm = prefs.getInt(HEIGHT, 0),
-            weightKg = prefs.getFloat(WEIGHT, 0f).toDouble(),
+            ageYears = stored.getInt(AGE, 0),
+            heightCm = stored.getInt(HEIGHT, 0),
+            weightKg = stored.getFloat(WEIGHT, 0f).toDouble(),
         )
         return profile.takeIf { it.valid() }
     }
 
     fun save(profile: BodyProfile) {
         if (!profile.valid()) return
-        prefs.edit()
+        prefs().edit()
             .putString(SEX, profile.sex.name)
             .putInt(AGE, profile.ageYears)
             .putInt(HEIGHT, profile.heightCm)
@@ -50,6 +68,9 @@ class StoredBodyProfile @Inject constructor(
     }
 
     private companion object {
+        val PREFS_EXECUTOR: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "pulse-profile").apply { isDaemon = true }
+        }
         const val PREFS: String = "pulse.profile"
         const val SEX: String = "sex"
         const val AGE: String = "age"

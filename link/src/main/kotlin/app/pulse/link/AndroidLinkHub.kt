@@ -17,6 +17,7 @@ import app.pulse.data.DeviceDirectory
 import app.pulse.wire.codec.FrameIntake
 import app.pulse.wire.codec.FrameRing
 import java.util.UUID
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +49,11 @@ internal class AndroidLinkHub(
     private var sessionAddress: String? = null
     private var handshake: StrapHandshake? = null
     private val handshakeClock = SystemLinkClock()
+    private val handshakeRunner = HandshakeRunner(
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "pulse-handshake").apply { isDaemon = true }
+        },
+    )
     private var feedGeneration = 0
     private var heartRateJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -148,6 +154,10 @@ internal class AndroidLinkHub(
                 override fun onNotification(characteristic: UUID, value: ByteArray) {
                     val active = opened.session ?: return
                     if (session !== active) return
+                    // The simulator delivers this on the main thread. A real
+                    // radio delivers it on the GATT binder thread. Either way
+                    // the handshake only enqueues, and the device row is
+                    // written on the database thread.
                     handshake?.onNotification(characteristic, value)
                     commands.deliver(characteristic.toString(), value)
                 }
@@ -212,6 +222,7 @@ internal class AndroidLinkHub(
                 link?.onDeviceReport(update)
             },
             log = { line -> Log.i(BleClients.LOG_TAG, line) },
+            runner = handshakeRunner,
         )
         handshake = created
         created.start()
