@@ -120,6 +120,7 @@ class HistorySyncEngine(
     private var chunksCommitted = 0
     private var chunksDuplicate = 0
     private var recordsSeen = 0
+    private var lastPulseMs = Long.MIN_VALUE
     private var endsReceived = 0
     private var endsRetried = 0
     private var endsRejected = 0
@@ -205,8 +206,12 @@ class HistorySyncEngine(
     private fun onFrame(frame: WireFrame) {
         if (!active) return
         if (phase == SyncPhase.STREAM && frame.packetType in HistoryLimits.TRAFFIC) {
-            lastTrafficMs = nowMs()
-            onStreamPulse()
+            val now = nowMs()
+            lastTrafficMs = now
+            if (lastPulseMs == Long.MIN_VALUE || now - lastPulseMs >= STREAM_PULSE_MS) {
+                lastPulseMs = now
+                onStreamPulse()
+            }
         }
         val response = frame.toCommandResponse()
         if (response != null) {
@@ -329,6 +334,7 @@ class HistorySyncEngine(
         phase = SyncPhase.STREAM
         sawStart = false
         lastTrafficMs = nowMs()
+        lastPulseMs = lastTrafficMs
         publish()
         onStreamPulse()
     }
@@ -336,8 +342,11 @@ class HistorySyncEngine(
     private fun onRecord(frame: WireFrame) {
         records += frame
         recordsSeen += 1
-        publish()
-        if (records.size >= HistoryLimits.MAX_RECORDS_WITHOUT_END) {
+        val bounded = records.size >= HistoryLimits.MAX_RECORDS_WITHOUT_END
+        if (bounded || recordsSeen == 1 || recordsSeen % RECORD_PUBLISH_EVERY == 0) {
+            publish()
+        }
+        if (bounded) {
             dropChunk()
             finish(SessionOutcome.BOUNDED)
         }
@@ -525,7 +534,9 @@ class HistorySyncEngine(
             lastAckKind = AckKind.HANDED_OFF
             lastAckResult = null
         }
-        log("history ack handed to the radio")
+        if (ackSent == 1 || ackSent % ACK_LOG_EVERY == 0) {
+            log("history ack handed to the radio")
+        }
         publish()
     }
 
@@ -545,7 +556,10 @@ class HistorySyncEngine(
         if (open.pending) ackPending -= 1
         lastAckKind = AckKind.RESULT
         lastAckResult = match.result
-        log("history ack result ${match.result}")
+        val resultCount = ackResult1 + ackResult0 + 1
+        if (resultCount == 1 || resultCount % ACK_LOG_EVERY == 0) {
+            log("history ack result ${match.result}")
+        }
         if (match.result == CommandResult.SUCCESS) {
             try {
                 store.markAcknowledged(open.sessionId, open.token, phone.now().unixSeconds)
@@ -679,5 +693,8 @@ class HistorySyncEngine(
 
     private companion object {
         val NEXT_CONNECTION = AtomicLong(0)
+        const val RECORD_PUBLISH_EVERY: Int = 100
+        const val STREAM_PULSE_MS: Long = 1_000L
+        const val ACK_LOG_EVERY: Int = 100
     }
 }

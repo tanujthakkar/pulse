@@ -37,8 +37,9 @@ import kotlinx.coroutines.launch
  *
  * A history sync used to finish while this screen still showed the empty book
  * from startup. [DayMetricsSource.watch] fires when those rows commit, and
- * the next quiet moment reads the book again. My Day, the Dashboard, and
- * Health Monitor all render that same read.
+ * the next quiet moment reads the book again. A read that finishes is always
+ * shown, including the current day. My Day, the Dashboard, and Health Monitor
+ * all render that same read.
  *
  * This does not send strap commands. Live bpm is whatever the open session
  * has already published on the standard heart-rate measurement. The trace is
@@ -63,7 +64,6 @@ class HomeViewModel internal constructor(
         heart: LiveHeartRateFeed,
     ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor())
 
-    private val generation = AtomicInteger()
     private val reloadTicket = AtomicInteger()
     private val reloadQueued = AtomicBoolean(false)
     private val _ui = MutableStateFlow<HomeContent?>(null)
@@ -139,11 +139,12 @@ class HomeViewModel internal constructor(
     }
 
     fun refresh() {
-        val ticket = generation.incrementAndGet()
         executor.execute {
             val loaded = try {
                 days.snapshot()
             } catch (_: Exception) {
+                DaySnapshot(DayBook(ZoneId.systemDefault().id, emptyList(), "Day metrics could not be read."), null, null)
+            } catch (_: OutOfMemoryError) {
                 DaySnapshot(DayBook(ZoneId.systemDefault().id, emptyList(), "Day metrics could not be read."), null, null)
             }
             val rows = try {
@@ -151,7 +152,6 @@ class HomeViewModel internal constructor(
             } catch (_: Exception) {
                 emptyList()
             }
-            if (generation.get() != ticket) return@execute
             snapshot = loaded
             logged = rows
             strains = strainLabels(rows)

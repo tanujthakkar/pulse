@@ -113,8 +113,48 @@ class ActivityDetailTest {
         assertEquals("Run", detail.title)
         assertEquals("120 bpm", detail.rows.first { it.first == "Average HR" }.second)
         assertTrue(detail.rows.first { it.first == "Strain" }.second.contains("approximate"))
-        assertEquals(1, days.snapshots)
+        assertEquals(0, days.snapshots)
         assertEquals(1, days.windows)
+    }
+
+    @Test
+    fun sleepDetailReadsTheWindowAndDoesNotRecomputeEveryDay() {
+        val zone = ZoneOffset.UTC
+        val start = LocalDate.of(2026, 11, 8).atTime(23, 0).toEpochSecond(zone)
+        val asleep = 3
+        val records = (0 until asleep).map { offset ->
+            heart(start + offset, 48).copy(bandMotion = app.pulse.metrics.DayRules.SLEEP)
+        }
+        val days = FakeDays(records, day(LocalDate.of(2026, 11, 9), start))
+        val detail = loadActivityDetail("SLEEP", start, start + 7 * 3600, days, FakeLog(emptyList()))
+        assertEquals(0, days.snapshots)
+        assertEquals(1, days.windows)
+        assertEquals("Sleep", detail.title)
+        assertEquals(formatDuration(asleep.toLong()), detail.rows.first { it.first == "Duration" }.second)
+    }
+
+    @Test
+    fun overlappingSleepRowsMergeIntoTheLongerNight() {
+        val zone = ZoneOffset.UTC
+        val date = LocalDate.of(2026, 11, 9)
+        val start = date.minusDays(1).atTime(23, 0).toEpochSecond(zone)
+        val partial = SleepEpisode(start, start + 30 * 60 - 1, 30 * 60, 30 * 60L, date)
+        val full = SleepEpisode(start, start + 7 * 3600 - 1, 7 * 3600, (7 * 3600).toLong(), date)
+        val stored = day(date, start).copy(
+            episodes = listOf(partial, full),
+            main = full,
+            strapSeconds = 7 * 3600,
+        )
+        val content = homeContent(
+            day = stored,
+            date = date,
+            today = date,
+            logged = emptyList(),
+            live = HomeLive(bpm = null, batteryPercent = null, lastSyncUnixSeconds = null, zone = zone),
+        )
+        assertEquals(1, content.activities.size)
+        assertEquals("7h 0m", content.activities.single().tile)
+        assertEquals("11:00 PM", content.activities.single().startLabel)
     }
 
     private fun heart(unix: Long, bpm: Int) = SecondRecord(
@@ -181,6 +221,9 @@ class ActivityDetailTest {
             snapshots += 1
             return DaySnapshot(DayBook("UTC", listOf(day), null), null, null)
         }
+
+        override fun cachedSnapshot(): DaySnapshot =
+            DaySnapshot(DayBook("UTC", listOf(day), null), null, null)
 
         override fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> {
             windows += 1

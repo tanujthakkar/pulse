@@ -23,9 +23,10 @@ import java.util.concurrent.TimeUnit
  * existing sync attempt. It does not send command 23 itself.
  *
  * Success is a finished history attempt, a recent one still inside the
- * cooldown, or nothing to do. Starting an attempt is not success: the worker
- * waits for that attempt and only then reports the outcome. A strap that is
- * not ready, a reconnect, or an attempt that did not complete is [Result.retry].
+ * cooldown, or nothing to do because no strap is connecting. Starting an
+ * attempt is not success, and neither is an idle result while the link is
+ * still coming up: the worker waits, then reports the outcome. A strap that
+ * is not ready, a reconnect, or an attempt that did not complete is [Result.retry].
  */
 class AutoSyncWorker(
     context: Context,

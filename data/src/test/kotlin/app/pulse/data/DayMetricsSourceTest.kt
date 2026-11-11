@@ -29,6 +29,30 @@ class DayMetricsSourceTest {
     }
 
     @Test
+    fun coveringDatesUsesBoundsAndDoesNotRequireTheRows() {
+        val zone = ZoneOffset.UTC
+        val first = LocalDate.of(2026, 11, 8).atStartOfDay(zone).toEpochSecond()
+        val last = LocalDate.of(2026, 11, 10).atTime(6, 0).toEpochSecond(zone)
+        val dates = coveringDates(
+            strapMin = first,
+            strapMax = last,
+            edgeMinMs = null,
+            edgeMaxMs = null,
+            zone = zone,
+            scoreDayIds = listOf("2026-11-12"),
+        )
+        assertEquals(
+            listOf(
+                LocalDate.of(2026, 11, 8),
+                LocalDate.of(2026, 11, 9),
+                LocalDate.of(2026, 11, 10),
+                LocalDate.of(2026, 11, 12),
+            ),
+            dates,
+        )
+    }
+
+    @Test
     fun aMissingDeviceRowDoesNotPrintAnAddress() {
         val text = metricsText(ZoneOffset.UTC, null)
         assertTrue(text.contains("No device row is stored."))

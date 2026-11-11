@@ -291,6 +291,20 @@ class HistorySyncEngineTest {
     }
 
     @Test
+    fun aBurstOfRecordsDoesNotPublishOncePerRecord() {
+        val seen = mutableListOf<SyncSnapshot>()
+        val run = run(
+            MemorySyncStore(),
+            script(stream = StreamKind.FLOOD, floodCount = 200),
+            onProgress = { seen += it },
+        )
+        assertEquals(200, run.engine.snapshot().records)
+        val during = seen.count { it.phase == SyncPhase.STREAM && it.records > 0 && it.outcome == null }
+        assertTrue(seen.any { it.records == 1 && it.chunks == 0 })
+        assertTrue(during < 20)
+    }
+
+    @Test
     fun unknownLayoutIsArchivedInTheSameCommitThenAcked() {
         val store = MemorySyncStore()
         val token = byteArrayOf(3, 1, 4, 1, 5, 9, 2, 6)

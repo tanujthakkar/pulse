@@ -47,6 +47,34 @@ class AutoSyncStartTest {
     }
 
     @Test
+    fun aWorkerDoesNotSucceedWhileTheLinkIsStillComingUp() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val link = StrapLink(presentPorts(), idleClock())
+        val sync = HistorySyncHost(StrapCommandPort(), QuietStore(), link)
+        val coordinator = AutoSyncCoordinator(link, sync, NoDevice(), context)
+        coordinator.workerWaitMs = 300
+        link.start()
+        assertEquals(LinkPhase.SCANNING, link.snapshot().phase)
+        val started = System.currentTimeMillis()
+        val outcome = coordinator.runWorker()
+        assertEquals(AutoSyncOutcome.NOT_READY, outcome)
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(outcome))
+        assertTrue(System.currentTimeMillis() - started >= 200)
+    }
+
+    @Test
+    fun aWorkerSucceedsImmediatelyWhenNothingIsConnecting() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val link = StrapLink(presentPorts(), idleClock())
+        val sync = HistorySyncHost(StrapCommandPort(), QuietStore(), link)
+        val coordinator = AutoSyncCoordinator(link, sync, NoDevice(), context)
+        coordinator.workerWaitMs = 5_000
+        val started = System.currentTimeMillis()
+        assertEquals(AutoSyncOutcome.IDLE, coordinator.runWorker())
+        assertTrue(System.currentTimeMillis() - started < 1_000)
+    }
+
+    @Test
     fun theWorkerWaitsUntilTheHistoryAttemptCompletes() {
         var running = true
         var outcome: app.pulse.sync.SessionOutcome? = null

@@ -54,6 +54,7 @@ class GattSession internal constructor(
     private var strapNotifiesQueued = false
     private var mtuSettled = false
     private var discoveredCharacteristics: Set<UUID> = emptySet()
+    private var notifyCount = 0
 
     @Volatile
     var phase: SessionPhase = SessionPhase.IDLE
@@ -427,8 +428,16 @@ class GattSession internal constructor(
     private fun handleNotification(characteristic: UUID, value: ByteArray) {
         if (phase == SessionPhase.CLOSED || phase == SessionPhase.IDLE) return
         trace(incoming = true, characteristic, value)
-        opLog.mark("NOTIFY $characteristic bytes=${value.size}")
-        log.log("NOTIFY $characteristic bytes=${value.size}")
+        notifyCount += 1
+        if (notifyCount == 1) {
+            val line = "NOTIFY $characteristic bytes=${value.size}"
+            opLog.mark(line)
+            log.log(line)
+        } else if (notifyCount % NOTIFY_LOG_EVERY == 0) {
+            val line = "NOTIFY count=$notifyCount"
+            opLog.mark(line)
+            log.log(line)
+        }
         if (characteristic == StrapGatt.HEART_RATE_MEASUREMENT) {
             noteHeartRateNotification()
             val sample = StandardHeartRateParser.parse(value, nowMillis())
@@ -509,6 +518,11 @@ class GattSession internal constructor(
         try {
             radio.close()
         } finally {
+            if (notifyCount > 1) {
+                val line = "NOTIFY total=$notifyCount"
+                opLog.mark(line)
+                log.log(line)
+            }
             opLog.mark("CLOSE")
             log.log("CLOSE")
             alarms.close()
@@ -597,6 +611,7 @@ class GattSession internal constructor(
 
     companion object {
         const val OP_TIMEOUT_MS: Long = 10_000
+        const val NOTIFY_LOG_EVERY: Int = 1_000
 
         /** Tell-tale for a proprietary response descriptor that never completes. */
         const val PROPRIETARY_CCCD_TIMEOUT_MS: Long = 5_000

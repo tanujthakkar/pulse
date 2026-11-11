@@ -3,16 +3,23 @@ package app.pulse.data
 import androidx.room.ColumnInfo
 import androidx.room.InvalidationTracker
 import app.pulse.metrics.DayBook
+import app.pulse.metrics.DayResult
 import app.pulse.metrics.EdgeDayNote
 import app.pulse.metrics.EdgeSleepWindow
 import app.pulse.metrics.SOURCE_EDGE
 import app.pulse.metrics.SOURCE_STRAP
 import app.pulse.metrics.SecondRecord
 import app.pulse.metrics.DayRules
+import app.pulse.metrics.baselineRhythms
 import app.pulse.metrics.computeDays
+import app.pulse.metrics.datesToRecompute
 import app.pulse.metrics.dayBookText
+import app.pulse.metrics.daysByWindow
 import app.pulse.metrics.prepareWindow
+import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Columns the day screen reads from one stored layout-18 second.
@@ -65,19 +72,53 @@ interface DayMetricsSource {
 
     /** Strap and Edge seconds in [startUnix, endUnix), with strap winning a one-second overlap. */
     fun windowRecords(startUnix: Long, endUnix: Long): List<SecondRecord> = emptyList()
+
+    /**
+     * The last book [snapshot] finished, without reading the store again.
+     *
+     * Activity detail uses this for a resting heart rate it already has.
+     * A miss stays on the activity window instead of computing every day.
+     */
+    fun cachedSnapshot(): DaySnapshot? = null
 }
 
 class RoomDayMetrics(
     private val database: PulseDatabase,
     private val devices: DeviceDirectory,
 ) : DayMetricsSource {
-    override fun report(zone: ZoneId): String {
-        val loaded = read(zone)
-        if (loaded.failed) return "Day metrics could not be read.\n"
-        return dayBookText(loaded.snapshot.book)
+    private val changes = AtomicInteger()
+    private val gate = Any()
+    private var cached: DaySnapshot? = null
+    private var cachedStamp = -1
+    private var cachedZone: String? = null
+    private var cachedDays: List<DayResult> = emptyList()
+    private var cachedStrapMin: Long? = null
+
+    override fun report(zone: ZoneId): String = dayBookText(snapshot(zone).book)
+
+    override fun snapshot(zone: ZoneId): DaySnapshot {
+        val stamp = changes.get()
+        synchronized(gate) {
+            val hit = cached
+            if (hit != null && cachedStamp == stamp && cachedZone == zone.id) return hit
+        }
+        val built = try {
+            build(zone)
+        } catch (_: Exception) {
+            unread(zone)
+        } catch (_: OutOfMemoryError) {
+            unread(zone)
+        }
+        val failed = built.book.emptyReason == "Day metrics could not be read."
+        synchronized(gate) {
+            cached = built
+            cachedStamp = if (failed) -1 else stamp
+            cachedZone = if (failed) cachedZone else zone.id
+        }
+        return built
     }
 
-    override fun snapshot(zone: ZoneId): DaySnapshot = read(zone).snapshot
+    override fun cachedSnapshot(): DaySnapshot? = synchronized(gate) { cached }
 
     override fun watch(onChange: () -> Unit): () -> Unit {
         val observer = object : InvalidationTracker.Observer(
@@ -91,6 +132,7 @@ class RoomDayMetrics(
             "manual_activity",
         ) {
             override fun onInvalidated(tables: Set<String>) {
+                changes.incrementAndGet()
                 onChange()
             }
         }
@@ -122,39 +164,133 @@ class RoomDayMetrics(
         }
     }
 
-    private fun read(zone: ZoneId): DayRead {
-        return try {
-            val device = devices.latest()
-            val strap = if (device == null) {
-                emptyList()
-            } else {
-                database.samples().metricRows(device.address).map { it.toSecondRecord() }
-            }
-            val imported = database.edgeImport()
-            val inputs = StoredDayInputs(
-                oneHz = imported.metricOneHz(EDGE_IMPORT_SOURCE),
-                rr = imported.metricRr(EDGE_IMPORT_SOURCE),
-                sleep = imported.metricSleep(EDGE_IMPORT_SOURCE),
-                scores = imported.metricScores(EDGE_IMPORT_SOURCE),
-            )
-            val book = if (device == null && inputs.oneHz.isEmpty()) {
-                DayBook(zone.id, emptyList(), "No device row is stored.")
-            } else {
-                val assembly = assembleDays(strap, inputs)
-                computeDays(assembly.records, zone, assembly.windows, assembly.notes)
-            }
-            val sync = database.sessions().latestActivityUnixSeconds()
-            DayRead(DaySnapshot(book, batteryPercent(device), sync), failed = false)
-        } catch (_: Exception) {
-            DayRead(
-                DaySnapshot(DayBook(zone.id, emptyList(), "Day metrics could not be read."), null, null),
-                failed = true,
+    /**
+     * Reads each local day from its own window and keeps earlier days.
+     *
+     * A history sync only appends, so a day before yesterday does not change
+     * when today's samples arrive. The window is dropped after that day is
+     * built. Nothing here holds every stored second at once.
+     */
+    private fun build(zone: ZoneId): DaySnapshot {
+        val device = devices.latest()
+        val samples = database.samples()
+        val strapMin = device?.let { samples.minUnix(it.address) }
+        val strapMax = device?.let { samples.maxUnix(it.address) }
+        val imported = database.edgeImport()
+        val sleep = imported.metricSleep(EDGE_IMPORT_SOURCE)
+        val scores = imported.metricScores(EDGE_IMPORT_SOURCE)
+        val notes = scores.map {
+            EdgeDayNote(
+                dayId = it.dayId,
+                algoVersion = it.algoVersion,
+                restingHr = it.rhr,
+                rmssd = it.rmssd,
+                readiness = it.readiness,
             )
         }
+        val windows = sleepWindows(sleep)
+        if (device == null && strapMin == null && imported.minOneHz(EDGE_IMPORT_SOURCE) == null &&
+            sleep.isEmpty() && scores.isEmpty()
+        ) {
+            cachedDays = emptyList()
+            cachedStrapMin = null
+            return DaySnapshot(
+                DayBook(zone.id, emptyList(), "No device row is stored."),
+                batteryPercent(device),
+                database.sessions().latestActivityUnixSeconds(),
+            )
+        }
+        val dates = coveringDates(
+            strapMin = strapMin,
+            strapMax = strapMax,
+            edgeMinMs = imported.minOneHz(EDGE_IMPORT_SOURCE),
+            edgeMaxMs = imported.maxOneHz(EDGE_IMPORT_SOURCE),
+            zone = zone,
+            scoreDayIds = scores.map { it.dayId },
+        )
+        val keep = if (cachedStrapMin == strapMin && cachedZone == zone.id) cachedDays else emptyList()
+        val keptDates = keep.map { it.date }.toSet()
+        val freshDates = datesToRecompute(dates, keptDates)
+        val kept = keep.filter { it.date !in freshDates }
+        val fresh = daysByWindow(
+            zone = zone,
+            dates = freshDates,
+            loadWindow = { start, end ->
+                val strap = if (device == null) {
+                    emptyList()
+                } else {
+                    samples.metricRowsBetween(device.address, start, end).map { it.toSecondRecord() }
+                }
+                val assembly = assembleDays(
+                    strap,
+                    StoredDayInputs(
+                        oneHz = imported.metricOneHzBetween(EDGE_IMPORT_SOURCE, start * 1000L, end * 1000L),
+                        rr = imported.metricRrBetween(EDGE_IMPORT_SOURCE, start * 1000L, end * 1000L),
+                        sleep = sleep,
+                        scores = scores,
+                    ),
+                )
+                assembly.records
+            },
+            priorRhythms = baselineRhythms(kept),
+            edgeWindows = windows,
+            edgeScores = notes,
+        )
+        val days = (kept + fresh).sortedByDescending { it.date }
+        cachedDays = days
+        cachedStrapMin = strapMin
+        val book = if (days.isEmpty()) {
+            DayBook(zone.id, emptyList(), "No layout-18 or Edge one-second rows are stored.")
+        } else {
+            DayBook(zone.id, days, null)
+        }
+        return DaySnapshot(book, batteryPercent(device), database.sessions().latestActivityUnixSeconds())
     }
 }
 
-private data class DayRead(val snapshot: DaySnapshot, val failed: Boolean)
+private fun unread(zone: ZoneId): DaySnapshot =
+    DaySnapshot(DayBook(zone.id, emptyList(), "Day metrics could not be read."), null, null)
+
+/**
+ * Local dates that have strap seconds, Edge seconds, or an Edge day score.
+ *
+ * The bounds are aggregates. This does not load the samples.
+ */
+internal fun coveringDates(
+    strapMin: Long?,
+    strapMax: Long?,
+    edgeMinMs: Long?,
+    edgeMaxMs: Long?,
+    zone: ZoneId,
+    scoreDayIds: List<String> = emptyList(),
+): List<LocalDate> {
+    var min = strapMin
+    var max = strapMax
+    val edgeMin = edgeMinMs?.let { epochSeconds(it) }
+    val edgeMax = edgeMaxMs?.let { epochSeconds(it) }
+    if (edgeMin != null) min = if (min == null) edgeMin else minOf(min, edgeMin)
+    if (edgeMax != null) max = if (max == null) edgeMax else maxOf(max, edgeMax)
+    val dates = LinkedHashSet<LocalDate>()
+    if (min != null && max != null && max >= min) {
+        var date = Instant.ofEpochSecond(min).atZone(zone).toLocalDate()
+        val last = Instant.ofEpochSecond(max).atZone(zone).toLocalDate()
+        var guard = 0
+        while (!date.isAfter(last) && guard < 4_000) {
+            dates += date
+            date = date.plusDays(1)
+            guard += 1
+        }
+    }
+    for (id in scoreDayIds) {
+        val parsed = try {
+            LocalDate.parse(id)
+        } catch (_: Exception) {
+            null
+        }
+        if (parsed != null) dates += parsed
+    }
+    return dates.sorted()
+}
 
 private fun batteryPercent(device: DeviceRow?): Int? {
     device ?: return null

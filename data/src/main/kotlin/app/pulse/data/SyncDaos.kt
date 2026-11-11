@@ -92,6 +92,12 @@ interface R18SampleDao {
             "ORDER BY unix_s ASC, record_index ASC",
     )
     fun metricRowsBetween(deviceId: String, startUnix: Long, endUnix: Long): List<R18MetricRow>
+
+    @Query("SELECT MIN(unix_s) FROM r18_sample WHERE device_id = :deviceId")
+    fun minUnix(deviceId: String): Long?
+
+    @Query("SELECT MAX(unix_s) FROM r18_sample WHERE device_id = :deviceId")
+    fun maxUnix(deviceId: String): Long?
 }
 
 @Dao

@@ -27,6 +27,7 @@ import app.pulse.data.ActivityLog
 import app.pulse.data.DayMetricsSource
 import app.pulse.metrics.ActivityKind
 import app.pulse.metrics.ActivityWindowStats
+import app.pulse.metrics.DayRules
 import app.pulse.metrics.HeartChartPoint
 import app.pulse.metrics.Rhythm
 import app.pulse.metrics.activityWindow
@@ -84,31 +85,26 @@ internal fun loadActivityDetail(
     activities: ActivityLog,
 ): ActivityDetail {
     val kind = runCatching { ActivityKind.valueOf(kindName) }.getOrDefault(ActivityKind.MANUAL)
-    val snapshot = days.snapshot()
-    val zone = zoneOf(snapshot.book.zone)
-    val records = days.windowRecords(start, end)
+    val cached = days.cachedSnapshot()
+    val zone = cached?.book?.zone?.let { zoneOf(it) } ?: ZoneId.systemDefault()
     if (kind == ActivityKind.SLEEP) {
-        val day = snapshot.book.days.firstOrNull { result ->
-            result.episodes.any { it.startUnix == start && it.endUnix == end } ||
-                (result.main?.startUnix == start && result.main?.endUnix == end)
-        }
-        val episode = day?.episodes?.firstOrNull { it.startUnix == start && it.endUnix == end }
-        val rhythm = if (day?.main?.startUnix == start && day.main?.endUnix == end) {
-            day.rhythm
-        } else {
-            sleepRhythm(records, start, end, episode?.edgeProvided == true)
-        }
+        // The card's end is the last sleep sample, inclusive. The window query is exclusive.
+        val records = days.windowRecords(start, end + 1)
+        val asleep = records.count { it.unixSeconds in start..end && (it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep) }
+        val edge = records.isNotEmpty() && records.all { it.edgeWindowSleep && it.bandMotion != DayRules.SLEEP }
+        val rhythm = sleepRhythm(records, start, end, edge)
         return sleepDetail(
             start,
             end,
             zone,
             rhythm,
-            episode?.edgeProvided == true,
-            asleepSeconds(episode?.sleepSeconds, start, end),
+            edge,
+            asleepSeconds(if (asleep > 0) asleep else null, start, end),
         )
     }
+    val records = days.windowRecords(start, end)
     val date = Instant.ofEpochSecond(start).atZone(zone).toLocalDate()
-    val resting = snapshot.book.days.firstOrNull { it.date == date }?.rhythm?.restingHr
+    val resting = cached?.book?.days?.firstOrNull { it.date == date }?.rhythm?.restingHr
     val stats = activityWindow(records, start, end, resting)
     val title = activities.all().firstOrNull { it.startUnix == start && it.endUnix == end }?.type ?: "Activity"
     return workoutDetail(title, stats)

@@ -497,7 +497,9 @@ private fun dayResult(
     val acceptedRr = mine.count { sample -> sample.rrMillis.any { it in DayRules.RR_MIN_MS..DayRules.RR_MAX_MS } }
     val span = spanOf(mine)
     val overlapping = episodes.filter { it.endUnix >= start && it.startUnix < end }
-    val qualifying = overlapping.filter { it.sleepSeconds >= DayRules.MIN_SLEEP_SECONDS }
+    val qualifying = mergeSleepEpisodes(
+        overlapping.filter { it.sleepSeconds >= DayRules.MIN_SLEEP_SECONDS },
+    )
     val short = overlapping.filter { it.sleepSeconds < DayRules.MIN_SLEEP_SECONDS }
     val main = qualifying.filter { it.endDate == date }.maxWithOrNull(compareBy({ it.sleepSeconds }, { it.spanSeconds }))
     val rhythm = main?.let { measure(samples, it) }
@@ -699,15 +701,33 @@ private fun scoreRecovery(
     prior: List<SleepEpisode>,
     samples: List<SecondRecord>,
 ): Recovery {
-    val qualifying = ArrayList<Rhythm>()
+    val measured = ArrayList<Rhythm>()
     for (episode in prior) {
+        if (measured.count { it.pairs >= DayRules.MIN_PAIRS && it.rmssdMs != null && it.restingHr != null } ==
+            DayRules.BASELINE_DAYS
+        ) {
+            break
+        }
+        measured += measure(samples, episode)
+    }
+    return recoveryFromRhythms(if (main != null) rhythm else null, measured)
+}
+
+/**
+ * Recovery from today's rhythm and earlier nights, newest first.
+ *
+ * The earlier nights are already measured. This does not read samples.
+ * Fewer than [DayRules.MIN_BASELINE_DAYS] qualifying nights leaves the score blank.
+ */
+fun recoveryFromRhythms(rhythm: Rhythm?, prior: List<Rhythm>): Recovery {
+    val qualifying = ArrayList<Rhythm>()
+    for (measured in prior) {
         if (qualifying.size == DayRules.BASELINE_DAYS) break
-        val measured = measure(samples, episode)
         if (measured.pairs >= DayRules.MIN_PAIRS && measured.rmssdMs != null && measured.restingHr != null) {
             qualifying += measured
         }
     }
-    val todayReady = main != null && rhythm != null && rhythm.pairs >= DayRules.MIN_PAIRS &&
+    val todayReady = rhythm != null && rhythm.pairs >= DayRules.MIN_PAIRS &&
         rhythm.rmssdMs != null && rhythm.restingHr != null
     if (!todayReady || qualifying.size < DayRules.MIN_BASELINE_DAYS) {
         return Recovery(
@@ -740,6 +760,115 @@ private fun scoreRecovery(
         restingDelta = delta,
         unclamped = raw,
     )
+}
+
+/**
+ * One row when a later read still contains the shorter copy of the same night.
+ *
+ * Episodes that overlap, or that sit within [DayRules.BRIDGE_SECONDS] of each
+ * other, become one episode. A morning night and an evening night stay apart.
+ * Overlap keeps the longer sample count. A gap that is only bridged adds the counts.
+ */
+fun mergeSleepEpisodes(episodes: List<SleepEpisode>): List<SleepEpisode> {
+    if (episodes.size < 2) return episodes
+    val ordered = episodes.sortedWith(compareBy({ it.startUnix }, { it.endUnix }))
+    val merged = ArrayList<SleepEpisode>()
+    var current = ordered.first()
+    for (index in 1 until ordered.size) {
+        val next = ordered[index]
+        if (next.startUnix <= current.endUnix + DayRules.BRIDGE_SECONDS) {
+            val start = minOf(current.startUnix, next.startUnix)
+            val end = maxOf(current.endUnix, next.endUnix)
+            val overlaps = next.startUnix <= current.endUnix
+            val seconds = if (overlaps) {
+                maxOf(current.sleepSeconds, next.sleepSeconds)
+            } else {
+                current.sleepSeconds + next.sleepSeconds
+            }
+            val later = if (next.endUnix >= current.endUnix) next else current
+            current = later.copy(
+                startUnix = start,
+                endUnix = end,
+                sleepSeconds = seconds,
+                spanSeconds = end - start + 1,
+                edgeProvided = current.edgeProvided && next.edgeProvided,
+            )
+        } else {
+            merged += current
+            current = next
+        }
+    }
+    merged += current
+    return merged
+}
+
+/**
+ * Dates still worth reading after a forward history sync.
+ *
+ * Earlier days stay in [cached]. The latest day and the day before it are
+ * read again, because a night crosses midnight and a partial evening row has
+ * to be replaced once the rest of that night is stored.
+ */
+fun datesToRecompute(dates: List<LocalDate>, cached: Set<LocalDate>): List<LocalDate> {
+    if (dates.isEmpty()) return emptyList()
+    val earliestFresh = dates.last().minusDays(1)
+    return dates.filter { it >= earliestFresh || it !in cached }
+}
+
+/**
+ * Qualifying main-sleep rhythms, newest first, capped at [DayRules.BASELINE_DAYS].
+ */
+fun baselineRhythms(days: List<DayResult>): List<Rhythm> {
+    return days
+        .sortedByDescending { it.date }
+        .mapNotNull { day ->
+            val rhythm = day.rhythm ?: return@mapNotNull null
+            if (day.main == null) return@mapNotNull null
+            if (rhythm.pairs >= DayRules.MIN_PAIRS && rhythm.rmssdMs != null && rhythm.restingHr != null) {
+                rhythm
+            } else {
+                null
+            }
+        }
+        .take(DayRules.BASELINE_DAYS)
+}
+
+/**
+ * One local day at a time, then the samples for that day can be dropped.
+ *
+ * [loadWindow] is asked for the previous noon through the next midnight, which
+ * covers a night that started the evening before. Recovery uses [priorRhythms]
+ * (newest first) instead of measuring those older nights again.
+ */
+fun daysByWindow(
+    zone: ZoneId,
+    dates: List<LocalDate>,
+    loadWindow: (startUnix: Long, endUnix: Long) -> List<SecondRecord>,
+    priorRhythms: List<Rhythm> = emptyList(),
+    edgeWindows: List<EdgeSleepWindow> = emptyList(),
+    edgeScores: List<EdgeDayNote> = emptyList(),
+): List<DayResult> {
+    val priors = ArrayList<Rhythm>(priorRhythms.size)
+    priors += priorRhythms
+    val days = ArrayList<DayResult>()
+    for (date in dates.sorted()) {
+        val start = date.minusDays(1).atTime(12, 0).atZone(zone).toEpochSecond()
+        val end = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
+        val window = loadWindow(start, end)
+        val computed = computeDays(window, zone, edgeWindows, edgeScores).days.firstOrNull { it.date == date }
+            ?: continue
+        val recovery = if (computed.main == null) null else recoveryFromRhythms(computed.rhythm, priors)
+        val day = computed.copy(recovery = recovery)
+        days += day
+        val rhythm = day.rhythm
+        if (day.main != null && rhythm != null &&
+            rhythm.pairs >= DayRules.MIN_PAIRS && rhythm.rmssdMs != null && rhythm.restingHr != null
+        ) {
+            priors.add(0, rhythm)
+            while (priors.size > DayRules.BASELINE_DAYS) priors.removeAt(priors.lastIndex)
+        }
+    }
+    return days.sortedByDescending { it.date }
 }
 
 private fun scoreStrain(samples: List<SecondRecord>, resting: Int?): Strain {

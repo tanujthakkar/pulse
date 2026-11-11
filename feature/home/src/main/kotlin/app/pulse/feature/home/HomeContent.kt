@@ -9,6 +9,7 @@ import app.pulse.metrics.Recovery
 import app.pulse.metrics.LoggedActivity
 import app.pulse.metrics.activityTimeline
 import app.pulse.metrics.approximateStrain21
+import app.pulse.metrics.mergeSleepEpisodes
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -237,7 +238,7 @@ internal fun activitiesFor(
     zone: ZoneId,
     strains: Map<Long, String> = emptyMap(),
 ): List<HomeActivity> {
-    val sleep = day?.episodes.orEmpty().filter { it.endDate == date }
+    val sleep = mergeSleepEpisodes(day?.episodes.orEmpty().filter { it.endDate == date })
     val manual = logged.filter { Instant.ofEpochSecond(it.startUnix).atZone(zone).toLocalDate() == date }
     return activityTimeline(sleep, manual).map { card ->
         val episode = sleep.firstOrNull { it.startUnix == card.startUnix }

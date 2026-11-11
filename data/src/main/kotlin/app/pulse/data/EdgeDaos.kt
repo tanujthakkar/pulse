@@ -191,6 +191,12 @@ interface EdgeImportDao {
         "SELECT day_id, algo_version, rhr, rmssd, readiness FROM edge_day_score WHERE source = :source",
     )
     fun metricScores(source: String): List<EdgeScoreMetricRow>
+
+    @Query("SELECT MIN(ts_ms) FROM edge_onehz WHERE source = :source")
+    fun minOneHz(source: String): Long?
+
+    @Query("SELECT MAX(ts_ms) FROM edge_onehz WHERE source = :source")
+    fun maxOneHz(source: String): Long?
 }
 
 data class StrapHeartRate(

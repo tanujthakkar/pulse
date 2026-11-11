@@ -18,6 +18,7 @@ import app.pulse.sync.AutoSyncOutcome
 import app.pulse.sync.AutoSyncTrigger
 import app.pulse.sync.autoSyncAction
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,6 +54,10 @@ class AutoSyncCoordinator @Inject constructor(
     private var started = false
     private var wasLinked = false
     private var lastStartMs: Long? = null
+
+    /** How long [runWorker] waits for a link that is still coming up, then for the sync. */
+    @Volatile
+    internal var workerWaitMs: Long = AutoSync.WORKER_WAIT_MS
 
     fun start() {
         if (started) return
@@ -96,17 +101,39 @@ class AutoSyncCoordinator @Inject constructor(
      * Runs the worker trigger and, when that starts or joins a history attempt,
      * waits until the attempt finishes.
      *
-     * The result is not [AutoSyncOutcome.STARTED]. Callers that only need to
-     * kick a sync, such as a connect, still use [on].
+     * A link that is still scanning, bonding, connecting, or waiting on hello
+     * is not success. The worker waits for that link, then for the history
+     * attempt. The result is not [AutoSyncOutcome.STARTED]. Callers that only
+     * need to kick a sync, such as a connect, still use [on].
      */
     fun runWorker(): AutoSyncOutcome {
-        val started = on(AutoSyncTrigger.WORKER)
-        if (started != AutoSyncOutcome.STARTED && started != AutoSyncOutcome.IN_PROGRESS) return started
-        return settleWorkerSync(
-            running = { sync.running.value },
-            outcome = { sync.activity.value.outcome },
-            watch = { listener -> sync.watch(listener) },
-        )
+        val deadline = clock() + workerWaitMs
+        while (true) {
+            when (val outcome = on(AutoSyncTrigger.WORKER)) {
+                AutoSyncOutcome.STARTED,
+                AutoSyncOutcome.IN_PROGRESS,
+                -> {
+                    val left = (deadline - clock()).coerceAtLeast(1L)
+                    return settleWorkerSync(
+                        running = { sync.running.value },
+                        outcome = { sync.activity.value.outcome },
+                        watch = { listener -> sync.watch(listener) },
+                        timeoutMs = left,
+                    )
+                }
+                AutoSyncOutcome.COOLING_DOWN,
+                AutoSyncOutcome.FINISHED,
+                -> return outcome
+                AutoSyncOutcome.IDLE,
+                AutoSyncOutcome.NOT_READY,
+                AutoSyncOutcome.RECONNECTING,
+                AutoSyncOutcome.FAILED,
+                -> {
+                    if (!linkIsComingUp()) return outcome
+                    if (!waitForLink(deadline)) return AutoSyncOutcome.NOT_READY
+                }
+            }
+        }
     }
 
     fun on(trigger: AutoSyncTrigger): AutoSyncOutcome {
@@ -137,6 +164,49 @@ class AutoSyncCoordinator @Inject constructor(
 
     private fun readyForHistory(snapshot: LinkSnapshot): Boolean =
         snapshot.phase == LinkPhase.LINKED && snapshot.hello == HelloProgress.SUCCEEDED
+
+    private fun linkIsComingUp(): Boolean = when (link.snapshot().phase) {
+        LinkPhase.SCANNING,
+        LinkPhase.BONDING,
+        LinkPhase.CONNECTING,
+        LinkPhase.LINKED,
+        -> true
+        LinkPhase.IDLE,
+        LinkPhase.PAIRING_HELP,
+        LinkPhase.FAILED,
+        -> false
+    }
+
+    /**
+     * Blocks until the link leaves the connecting phases, a sync is running, or [deadlineMs].
+     *
+     * The current snapshot is delivered immediately and does not count as a change
+     * while the link is still coming up.
+     */
+    private fun waitForLink(deadlineMs: Long): Boolean {
+        val left = deadlineMs - clock()
+        if (left <= 0L) return false
+        if (readyForHistory(link.snapshot()) || sync.running.value) return false
+        val latch = CountDownLatch(1)
+        val onLink: (LinkSnapshot) -> Unit = { snapshot ->
+            val phase = snapshot.phase
+            val settled = readyForHistory(snapshot) ||
+                phase == LinkPhase.FAILED ||
+                phase == LinkPhase.IDLE ||
+                phase == LinkPhase.PAIRING_HELP
+            if (settled) latch.countDown()
+        }
+        link.watch(onLink)
+        val removeSync = sync.watch {
+            if (sync.running.value) latch.countDown()
+        }
+        return try {
+            latch.await(left, TimeUnit.MILLISECONDS)
+        } finally {
+            link.unwatch(onLink)
+            removeSync()
+        }
+    }
 
     private fun current(trigger: AutoSyncTrigger): AutoSyncInput {
         val snapshot = link.snapshot()

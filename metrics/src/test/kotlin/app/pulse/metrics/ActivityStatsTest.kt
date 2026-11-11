@@ -1,6 +1,7 @@
 package app.pulse.metrics
 
 import java.time.LocalDate
+import java.time.ZoneOffset
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -42,6 +43,31 @@ class ActivityStatsTest {
         assertTrue(stats.zones.trimp!! > 0.0)
         assertEquals(approximateStrain21(stats.zones.trimp!!), stats.approximateStrain)
         assertTrue(stats.chart.none { it.bpm == 200 || it.bpm == 180 })
+    }
+
+    @Test
+    fun aPartialNightInsideALongerNightBecomesOneEpisode() {
+        val date = LocalDate.of(2026, 11, 9)
+        val start = date.minusDays(1).atTime(23, 0).toEpochSecond(ZoneOffset.UTC)
+        val partial = SleepEpisode(start, start + 30 * 60 - 1, 30 * 60, 30 * 60L, date)
+        val full = SleepEpisode(start, start + 7 * 3600 - 1, 7 * 3600, (7 * 3600).toLong(), date.plusDays(1))
+        val merged = mergeSleepEpisodes(listOf(partial, full))
+        assertEquals(1, merged.size)
+        assertEquals(7 * 3600, merged[0].sleepSeconds)
+        assertEquals(start, merged[0].startUnix)
+        assertEquals(full.endUnix, merged[0].endUnix)
+    }
+
+    @Test
+    fun aMorningNightAndALaterEveningStaySeparate() {
+        val date = LocalDate.of(2026, 11, 9)
+        val morningStart = date.minusDays(1).atTime(23, 0).toEpochSecond(ZoneOffset.UTC)
+        val eveningStart = date.atTime(23, 0).toEpochSecond(ZoneOffset.UTC)
+        val morning = SleepEpisode(morningStart, morningStart + 7 * 3600 - 1, 7 * 3600, (7 * 3600).toLong(), date)
+        val evening = SleepEpisode(eveningStart, eveningStart + 30 * 60 - 1, 30 * 60, 30 * 60L, date)
+        val merged = mergeSleepEpisodes(listOf(evening, morning))
+        assertEquals(2, merged.size)
+        assertEquals(listOf(morningStart, eveningStart), merged.map { it.startUnix })
     }
 
     @Test

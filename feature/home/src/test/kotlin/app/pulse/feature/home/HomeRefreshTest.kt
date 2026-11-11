@@ -60,12 +60,54 @@ class HomeRefreshTest {
         assertTrue(shown.recovery.value.endsWith("%"))
     }
 
-    private fun syncedDay(): DayResult {
-        val start = DATE.minusDays(1).atTime(23, 0).toEpochSecond(ZoneOffset.UTC)
+    @Test
+    fun todayFillsInOnALaterReadWithoutANewViewModel() {
+        val today = LocalDate.of(2026, 11, 10)
+        val yesterday = today.minusDays(1)
+        val source = MutableDays()
+        val model = HomeViewModel(
+            days = source,
+            activities = EmptyLog,
+            link = StrapLink(QuietPorts, idleClock()),
+            heart = LiveHeartRateFeed(),
+            clock = { today },
+            executor = Executor { it.run() },
+            debounceMs = 0,
+            collectHeart = false,
+        )
+        assertEquals(today, model.ui.value!!.date)
+        assertTrue(model.ui.value!!.isToday)
+        assertEquals("--", model.ui.value!!.sleep.value)
+
+        source.book = DayBook("UTC", listOf(syncedDay(yesterday)), null)
+        source.fire()
+
+        assertEquals(today, model.ui.value!!.date)
+        assertEquals("--", model.ui.value!!.sleep.value)
+        assertTrue(model.ui.value!!.activities.isEmpty())
+        model.pick(yesterday)
+        assertEquals("88%", model.ui.value!!.sleep.value)
+        assertEquals("7h 0m", model.ui.value!!.activities.single().tile)
+        model.pick(today)
+        assertEquals("--", model.ui.value!!.sleep.value)
+
+        source.book = DayBook("UTC", listOf(syncedDay(today), syncedDay(yesterday)), null)
+        source.fire()
+
+        val shown = model.ui.value!!
+        assertEquals(today, shown.date)
+        assertTrue(shown.isToday)
+        assertEquals("88%", shown.sleep.value)
+        assertEquals("7h 0m", shown.activities.single().tile)
+        assertEquals("49", shown.monitor.hrv.text)
+    }
+
+    private fun syncedDay(date: LocalDate = DATE): DayResult {
+        val start = date.minusDays(1).atTime(23, 0).toEpochSecond(ZoneOffset.UTC)
         val asleep = 7 * 3600
-        val episode = SleepEpisode(start, start + asleep - 1, asleep, asleep.toLong(), DATE)
+        val episode = SleepEpisode(start, start + asleep - 1, asleep, asleep.toLong(), date)
         return DayResult(
-            date = DATE,
+            date = date,
             daySeconds = 86_400,
             storedSeconds = asleep,
             heartSeconds = asleep,

@@ -234,6 +234,6 @@ class HistorySyncDriver(
             ackNote = snap.ackNote,
         )
         onChange()
-        log("sync closed $outcome")
+        log("sync closed $outcome records=${activity.records} chunks=${activity.chunks}")
     }
 }

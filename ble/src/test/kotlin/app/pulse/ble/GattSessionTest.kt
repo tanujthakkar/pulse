@@ -65,6 +65,22 @@ class GattSessionTest {
     }
 
     @Test
+    fun notificationsAreSummarizedInsteadOfLoggedOneByOne() {
+        val fixture = SessionFixture()
+        fixture.openAndReady()
+        repeat(1_001) {
+            fixture.radio.emit(StrapGatt.DATA_NOTIFY, byteArrayOf(1))
+        }
+        fixture.session.disconnect()
+        fixture.radio.completeDisconnect()
+        val notify = fixture.session.opLogSnapshot().filter { it.startsWith("NOTIFY") }
+        assertEquals(3, notify.size)
+        assertEquals("NOTIFY ${StrapGatt.DATA_NOTIFY} bytes=1", notify[0])
+        assertEquals("NOTIFY count=1000", notify[1])
+        assertEquals("NOTIFY total=1001", notify[2])
+    }
+
+    @Test
     fun lowerGrantedMtuStillSubscribes() {
         val fixture = SessionFixture()
         fixture.openAndReady(mtu = 185)
