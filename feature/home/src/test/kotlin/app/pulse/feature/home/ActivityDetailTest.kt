@@ -126,11 +126,11 @@ class ActivityDetailTest {
             heart(start + offset, 48).copy(bandMotion = app.pulse.metrics.DayRules.SLEEP)
         }
         val days = FakeDays(records, day(LocalDate.of(2026, 11, 9), start))
-        val detail = loadActivityDetail("SLEEP", start, start + 7 * 3600, days, FakeLog(emptyList()))
+        val report = loadSleepReport(start, start + 7 * 3600, days)
         assertEquals(0, days.snapshots)
         assertEquals(1, days.windows)
-        assertEquals("Sleep", detail.title)
-        assertEquals(formatDuration(asleep.toLong()), detail.rows.first { it.first == "Duration" }.second)
+        assertEquals(asleep.toLong(), report.asleepSeconds)
+        assertTrue(report.stageNote.contains("not available"))
     }
 
     @Test

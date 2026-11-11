@@ -10,6 +10,7 @@ import app.pulse.metrics.ActivityCard
 fun HomeRoute(
     onOpenActivity: (ActivityCard) -> Unit,
     onOpenHealth: () -> Unit,
+    onOpenMetric: (String, java.time.LocalDate) -> Unit = { _, _ -> },
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val content by viewModel.ui.collectAsState()
@@ -20,6 +21,10 @@ fun HomeRoute(
         onOpenHealth = onOpenHealth,
         onSaveActivity = viewModel::saveActivity,
         onDeleteActivity = viewModel::deleteActivity,
+        onOpenMetric = { tag ->
+            val date = content?.date ?: return@HomeScreen
+            onOpenMetric(tag, date)
+        },
     )
 }
 

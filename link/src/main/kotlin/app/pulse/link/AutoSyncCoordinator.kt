@@ -19,6 +19,7 @@ import app.pulse.sync.AutoSyncTrigger
 import app.pulse.sync.autoSyncAction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -54,6 +55,10 @@ class AutoSyncCoordinator @Inject constructor(
     private var started = false
     private var wasLinked = false
     private var lastStartMs: Long? = null
+    @Volatile private var knownDevice: Boolean = false
+    private val deviceReads = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pulse-device-read").apply { isDaemon = true }
+    }
 
     /** How long [runWorker] waits for a link that is still coming up, then for the sync. */
     @Volatile
@@ -219,8 +224,26 @@ class AutoSyncCoordinator @Inject constructor(
             millisSinceLastStart = elapsed,
             phaseIdle = phase == LinkPhase.IDLE,
             phaseFailed = phase == LinkPhase.FAILED,
-            knownDevice = devices.latest() != null,
+            knownDevice = knownDevice(),
         )
+    }
+
+    /**
+     * A worker thread reads the device row. The main thread uses the last
+     * value and refreshes it in the background, so a reconnect decision does
+     * not open the database on the main thread.
+     */
+    private fun knownDevice(): Boolean {
+        val main = Looper.myLooper() == Looper.getMainLooper()
+        if (!main) {
+            val stored = devices.latest() != null
+            knownDevice = stored
+            return stored
+        }
+        deviceReads.execute {
+            knownDevice = devices.latest() != null
+        }
+        return knownDevice
     }
 
     private fun reconnect() {

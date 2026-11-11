@@ -15,6 +15,7 @@ class PulseApp : Application() {
     @Inject lateinit var strapLink: StrapLink
 
     override fun onCreate() {
+        installStrictMode()
         super.onCreate()
         // The host watches the strap link from the moment it is created.
         // Touching it here arms that watch before any Activity can start,

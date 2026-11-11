@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -19,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -324,13 +328,15 @@ private fun ActivityLine(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PulseSpace.md),
     ) {
-        Column(
+        Row(
             Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(row.tileTone.color()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .height(36.dp)
+                .widthIn(min = 76.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(activityBrush(row))
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PulseIcon(
                 if (row.card.kind == ActivityKind.SLEEP) PulseMark.MOON else PulseMark.RUN,
@@ -378,8 +384,25 @@ private fun ActivityLine(
     }
 }
 
+/**
+ * Sleep stays purple. Other activities darken from light blue to deep blue as
+ * strain rises from 0 to 21.
+ */
+internal fun activityBrush(row: HomeActivity): Brush {
+    if (row.card.kind == ActivityKind.SLEEP) {
+        return Brush.horizontalGradient(listOf(Color(0xFFDDD6FE), Color(0xFF6D28D9)))
+    }
+    val light = lerp(Color(0xFFBFDBFE), Color(0xFF1D4ED8), row.intensity)
+    val dark = lerp(Color(0xFF60A5FA), Color(0xFF0B1F4D), row.intensity)
+    return Brush.horizontalGradient(listOf(light, dark))
+}
+
 @Composable
-fun DashboardBlock(content: HomeContent, modifier: Modifier = Modifier) {
+fun DashboardBlock(
+    content: HomeContent,
+    modifier: Modifier = Modifier,
+    onOpenMetric: (String) -> Unit = {},
+) {
     Column(modifier.fillMaxWidth().testTag("home_dashboard"), verticalArrangement = Arrangement.spacedBy(PulseSpace.sm)) {
         Text("My Dashboard", color = PulsePalette.text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
         if (content.dashboard.isEmpty()) {
@@ -397,6 +420,7 @@ fun DashboardBlock(content: HomeContent, modifier: Modifier = Modifier) {
                     .semantics(mergeDescendants = true) { semanticsTag = card.tag }
                     .clip(RoundedCornerShape(18.dp))
                     .background(PulsePalette.surface)
+                    .clickable { onOpenMetric(card.tag) }
                     .padding(horizontal = PulseSpace.md, vertical = 18.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

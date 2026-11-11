@@ -7,10 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +41,7 @@ fun HomeScreen(
     onOpenHealth: () -> Unit,
     onSaveActivity: (Long?, String, LocalTime, LocalTime) -> Unit,
     onDeleteActivity: (Long) -> Unit,
+    onOpenMetric: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     initiallyShowCalendar: Boolean = false,
     initiallyEditing: Boolean = false,
@@ -58,16 +59,16 @@ fun HomeScreen(
             },
         )
     }
-    Column(
+    LazyColumn(
         modifier
             .fillMaxSize()
             .background(PulsePalette.background)
-            .verticalScroll(rememberScrollState())
-            .padding(PulseSpace.md)
-            .padding(bottom = 88.dp)
+            .padding(horizontal = PulseSpace.md)
             .testTag("home_screen"),
         verticalArrangement = Arrangement.spacedBy(PulseSpace.lg),
+        contentPadding = PaddingValues(top = PulseSpace.md, bottom = 88.dp),
     ) {
+        item {
         DateHeader(
             label = content?.headerLabel ?: "--",
             previousEnabled = content != null,
@@ -81,16 +82,20 @@ fun HomeScreen(
                 }
             },
         )
+        }
         if (content == null) {
+            item {
             Text(
                 "Reading stored history.",
                 color = PulsePalette.muted,
                 fontSize = PulseType.body,
                 modifier = Modifier.testTag("home_reading"),
             )
-            return@Column
+            }
+            return@LazyColumn
         }
         if (calendarOpen) {
+            item {
             MonthCalendar(
                 month = visibleMonth ?: YearMonth.from(content.date),
                 onMonth = { visibleMonth = it },
@@ -99,13 +104,17 @@ fun HomeScreen(
                     onPickDate(date)
                 },
             )
+            }
         }
         val banner = content.sampleBanner
         if (banner != null) {
+            item {
             Text(banner, color = PulsePalette.yellow, fontSize = PulseType.label, modifier = Modifier.testTag("home_sample"))
+            }
         }
-        SummaryRings(content, onOpenActivity)
-        HealthMonitorButton(onOpenHealth)
+        item { SummaryRings(content, onOpenActivity) }
+        item { HealthMonitorButton(onOpenHealth) }
+        item {
         MyDayBlock(
             content = content,
             onAdd = { editor = EditorState() },
@@ -138,7 +147,8 @@ fun HomeScreen(
                 }
             },
         )
-        DashboardBlock(content)
+        }
+        item { DashboardBlock(content, onOpenMetric = onOpenMetric) }
     }
 }
 

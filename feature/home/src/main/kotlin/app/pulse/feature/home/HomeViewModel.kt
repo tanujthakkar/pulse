@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.pulse.data.ActivityLog
 import app.pulse.data.DayMetricsSource
 import app.pulse.data.DaySnapshot
+import app.pulse.data.StoredBodyProfile
 import app.pulse.link.LinkSnapshot
 import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapLink
@@ -55,6 +56,7 @@ class HomeViewModel internal constructor(
     private val executor: Executor,
     private val debounceMs: Long = RELOAD_QUIET_MS,
     private val collectHeart: Boolean = true,
+    private val profiles: StoredBodyProfile? = null,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -62,8 +64,10 @@ class HomeViewModel internal constructor(
         activities: ActivityLog,
         link: StrapLink,
         heart: LiveHeartRateFeed,
-    ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor())
+        profiles: StoredBodyProfile,
+    ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor(), profiles = profiles)
 
+    private var stopProfile: () -> Unit = {}
     private val reloadTicket = AtomicInteger()
     private val reloadQueued = AtomicBoolean(false)
     private val _ui = MutableStateFlow<HomeContent?>(null)
@@ -105,6 +109,7 @@ class HomeViewModel internal constructor(
         }
         refresh()
         stopDays = days.watch { onDaysChanged() }
+        stopProfile = profiles?.watch { refresh() } ?: {}
     }
 
     /**
@@ -219,6 +224,7 @@ class HomeViewModel internal constructor(
             ),
             history = history,
             strains = strains,
+            profile = profiles?.current(),
         )
     }
 
@@ -244,6 +250,7 @@ class HomeViewModel internal constructor(
 
     override fun onCleared() {
         stopDays()
+        stopProfile()
         link.unwatch(onLink)
         (executor as? ExecutorService)?.shutdown()
     }

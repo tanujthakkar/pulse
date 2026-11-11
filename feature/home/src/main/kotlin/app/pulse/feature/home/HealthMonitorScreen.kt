@@ -212,7 +212,7 @@ private fun MonitorTile(card: MonitorCard, modifier: Modifier) {
             Text(
                 card.value.text,
                 color = PulsePalette.text,
-                fontSize = 26.sp,
+                fontSize = 40.sp,
                 fontWeight = FontWeight.Light,
             )
             val unit = card.value.unit

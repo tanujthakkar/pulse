@@ -19,6 +19,7 @@ import app.pulse.wire.codec.FrameNote
 import app.pulse.wire.codec.FrameRing
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.OutputStream
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,7 +75,10 @@ class DebugViewModel @Inject constructor(
     /** Keeps the link and data modules on the debug classpath. */
     val modulePins: String = "${LinkBuildInfo.SPEC}:${DataBuildInfo.SPEC}"
 
-    private val _body = MutableStateFlow(debugBody(link.snapshot(), devices.latest(), sync.acknowledgementNote()))
+    private val reads = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pulse-debug").apply { isDaemon = true }
+    }
+    private val _body = MutableStateFlow("Identity blocks from hello are redacted and are not stored.")
     val body: StateFlow<String> = _body.asStateFlow()
 
     private val _paused = MutableStateFlow(frames.paused)
@@ -99,14 +103,17 @@ class DebugViewModel @Inject constructor(
     private val unwatchSync: () -> Unit
 
     init {
-        link.watch { snapshot ->
+        link.watch { snapshot -> refreshBody(snapshot) }
+        unwatchSync = sync.watch { refreshBody(link.snapshot()) }
+        unwatchFrames = frames.watch { publish() }
+        refreshBody(link.snapshot())
+        publish()
+    }
+
+    private fun refreshBody(snapshot: LinkSnapshot) {
+        reads.execute {
             _body.value = debugBody(snapshot, devices.latest(), sync.acknowledgementNote())
         }
-        unwatchSync = sync.watch {
-            _body.value = debugBody(link.snapshot(), devices.latest(), sync.acknowledgementNote())
-        }
-        unwatchFrames = frames.watch { publish() }
-        publish()
     }
 
     fun setPaused(value: Boolean) {
@@ -126,17 +133,21 @@ class DebugViewModel @Inject constructor(
      * a local line and does not drop the frames.
      */
     fun export(open: () -> OutputStream?) {
-        val prefix = try {
-            days.report()
-        } catch (_: Exception) {
-            "Day metrics could not be read.\n"
+        val notes = frames.snapshot()
+        reads.execute {
+            val prefix = try {
+                days.report()
+            } catch (_: Exception) {
+                "Day metrics could not be read.\n"
+            }
+            _exportStatus.value = exportFrames(open, notes, prefix)
         }
-        _exportStatus.value = exportFrames(open, frames.snapshot(), prefix)
     }
 
     override fun onCleared() {
         unwatchFrames()
         unwatchSync()
+        reads.shutdown()
     }
 
     private fun publish() {

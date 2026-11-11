@@ -102,6 +102,7 @@ class DebugScreenTest {
 
         val exported = ByteArrayOutputStream()
         compose.runOnIdle { viewModel.export { exported } }
+        compose.waitUntil(timeoutMillis = 2_000) { viewModel.exportStatus.value.isNotEmpty() }
         compose.onNodeWithTag("debug_export_status").assertTextContains("Exported 3 frames.")
         val text = exported.toString(Charsets.UTF_8)
         assertTrue(text.startsWith("synthetic day metrics\n\n"))
@@ -126,6 +127,10 @@ class DebugScreenTest {
         )
         val exported = ByteArrayOutputStream()
         viewModel.export { exported }
+        val deadline = System.currentTimeMillis() + 2_000
+        while (viewModel.exportStatus.value.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
         val text = exported.toString(Charsets.UTF_8)
         assertTrue(text.startsWith("Day metrics could not be read.\n"))
         assertTrue(text.contains("pulse frames 0"))

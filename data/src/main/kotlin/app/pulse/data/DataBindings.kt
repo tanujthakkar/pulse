@@ -16,9 +16,7 @@ object DataBindings {
     @Provides
     @Singleton
     fun pulseDatabase(@ApplicationContext context: Context): PulseDatabase {
-        // The device row is one short read. Callers may read it on the main
-        // thread. Sync commits go through RoomSyncStore, which does not use
-        // this shortcut.
+        // Callers read and write this database off the main thread.
         return Room.databaseBuilder(context, PulseDatabase::class.java, PulseStoreFiles.name(context))
             .addMigrations(
                 PulseMigrations.FROM_1_TO_2,
@@ -27,7 +25,6 @@ object DataBindings {
                 PulseMigrations.FROM_4_TO_5,
                 PulseMigrations.FROM_5_TO_6,
             )
-            .allowMainThreadQueries()
             .build()
     }
 

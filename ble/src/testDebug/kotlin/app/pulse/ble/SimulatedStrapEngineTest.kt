@@ -80,7 +80,7 @@ class SimulatedStrapEngineTest {
         assertNull(day.reading.skinTempC)
         val night = decode(history.frame(SyntheticHistory.DAY_MINUTES))
         assertEquals(BandMotion.SLEEP, night.reading.bandState)
-        assertTrue(night.reading.heartRateBpm!! in 48..54)
+        assertTrue(night.reading.heartRateBpm!! in 46..48)
         assertEquals(1, night.reading.rrMillis.size)
         assertTrue(night.reading.stepCounter >= 0)
         assertEquals(33.2f, night.reading.skinTempC!!, 0.01f)

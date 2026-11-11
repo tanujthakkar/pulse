@@ -32,6 +32,7 @@ import app.pulse.metrics.HeartChartPoint
 import app.pulse.metrics.Rhythm
 import app.pulse.metrics.activityWindow
 import app.pulse.metrics.sleepRhythm
+import java.time.LocalDate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Instant
 import java.time.ZoneId
@@ -57,8 +58,8 @@ class ActivityDetailViewModel @Inject constructor(
     activities: ActivityLog,
     savedState: SavedStateHandle,
 ) : ViewModel() {
-    private val _detail = MutableStateFlow<ActivityDetail?>(null)
-    val detail: StateFlow<ActivityDetail?> = _detail.asStateFlow()
+    private val _page = MutableStateFlow<ActivityPage?>(null)
+    val page: StateFlow<ActivityPage?> = _page.asStateFlow()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pulse-activity").apply { isDaemon = true }
     }
@@ -68,7 +69,11 @@ class ActivityDetailViewModel @Inject constructor(
         val start = savedState.get<String>("start")?.toLongOrNull() ?: 0L
         val end = savedState.get<String>("end")?.toLongOrNull() ?: 0L
         executor.execute {
-            _detail.value = loadActivityDetail(kind, start, end, days, activities)
+            _page.value = if (kind == ActivityKind.SLEEP.name) {
+                ActivityPage.Sleep(loadSleepReport(start, end, days))
+            } else {
+                ActivityPage.Workout(loadActivityDetail(kind, start, end, days, activities))
+            }
         }
     }
 
@@ -130,6 +135,11 @@ fun workoutDetail(title: String, stats: ActivityWindowStats): ActivityDetail {
     )
 }
 
+sealed interface ActivityPage {
+    data class Workout(val detail: ActivityDetail) : ActivityPage
+    data class Sleep(val report: SleepReport) : ActivityPage
+}
+
 fun sleepDetail(
     start: Long,
     end: Long,
@@ -156,9 +166,17 @@ fun sleepDetail(
 }
 
 @Composable
-fun ActivityDetailRoute(onBack: () -> Unit, viewModel: ActivityDetailViewModel = hiltViewModel()) {
-    val detail by viewModel.detail.collectAsState()
-    ActivityDetailScreen(detail, onBack)
+fun ActivityDetailRoute(
+    onBack: () -> Unit,
+    onOpenMetric: (String, LocalDate) -> Unit = { _, _ -> },
+    viewModel: ActivityDetailViewModel = hiltViewModel(),
+) {
+    val page by viewModel.page.collectAsState()
+    when (val current = page) {
+        null -> ActivityDetailScreen(null, onBack)
+        is ActivityPage.Workout -> ActivityDetailScreen(current.detail, onBack)
+        is ActivityPage.Sleep -> SleepReportScreen(current.report, onBack, onOpenMetric)
+    }
 }
 
 @Composable

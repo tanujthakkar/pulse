@@ -22,6 +22,10 @@ object PulsePalette {
     val red: Color = Color(0xFFF05D5E)
     val blue: Color = Color(0xFF3D8BFF)
     val purple: Color = Color(0xFFA78BFA)
+    val orange: Color = Color(0xFFE8943A)
+    val deep: Color = Color(0xFFF472B6)
+    val rem: Color = Color(0xFF7C6BF2)
+    val lightStage: Color = Color(0xFFC4B5FD)
 }
 
 object PulseSpace {

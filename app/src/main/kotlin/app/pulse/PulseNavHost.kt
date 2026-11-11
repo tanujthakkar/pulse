@@ -24,9 +24,12 @@ import app.pulse.feature.home.HEALTH_ROUTE
 import app.pulse.feature.home.HealthMonitorRoute
 import app.pulse.feature.home.HomeRoute
 import app.pulse.feature.home.HomeTab
+import app.pulse.feature.home.METRIC_ROUTE
+import app.pulse.feature.home.MetricDetailRoute
 import app.pulse.feature.home.PulseBottomBar
 import app.pulse.feature.home.PulsePalette
 import app.pulse.feature.home.activityRoute
+import app.pulse.feature.home.metricRoute
 
 @Composable
 fun PulseNavHost(onSimulationChanged: () -> Unit = {}) {
@@ -52,6 +55,7 @@ fun PulseNavHost(onSimulationChanged: () -> Unit = {}) {
                 HomeRoute(
                     onOpenActivity = { card -> navController.navigate(activityRoute(card)) },
                     onOpenHealth = { navController.navigate(HEALTH_ROUTE) },
+                    onOpenMetric = { tag, date -> navController.navigate(metricRoute(tag, date)) },
                 )
             }
             composable(HEALTH_ROUTE) { entry ->
@@ -62,7 +66,13 @@ fun PulseNavHost(onSimulationChanged: () -> Unit = {}) {
                 )
             }
             composable(ACTIVITY_ROUTE) {
-                ActivityDetailRoute(onBack = { navController.popBackStack() })
+                ActivityDetailRoute(
+                    onBack = { navController.popBackStack() },
+                    onOpenMetric = { tag, date -> navController.navigate(metricRoute(tag, date)) },
+                )
+            }
+            composable(METRIC_ROUTE) {
+                MetricDetailRoute(onBack = { navController.popBackStack() })
             }
             composable(PulseRoute.More.route) {
                 MoreRoute(

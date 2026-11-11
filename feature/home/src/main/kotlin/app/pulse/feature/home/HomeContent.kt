@@ -3,13 +3,16 @@ package app.pulse.feature.home
 import app.pulse.link.LinkPhase
 import app.pulse.metrics.ActivityCard
 import app.pulse.metrics.ActivityKind
+import app.pulse.metrics.BodyProfile
 import app.pulse.metrics.DayResult
 import app.pulse.metrics.DayRules
 import app.pulse.metrics.Recovery
 import app.pulse.metrics.LoggedActivity
 import app.pulse.metrics.activityTimeline
 import app.pulse.metrics.approximateStrain21
+import app.pulse.metrics.estimatedDayKcal
 import app.pulse.metrics.mergeSleepEpisodes
+import app.pulse.metrics.uthVo2Max
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -59,6 +62,8 @@ data class HomeActivity(
     val startLabel: String,
     val endLabel: String,
     val dayPrefix: String?,
+    /** 0–1 strain for a non-sleep tile. Sleep ignores it and uses purple. */
+    val intensity: Float = 0f,
 )
 
 data class DashboardCard(
@@ -123,6 +128,7 @@ fun homeContent(
     live: HomeLive,
     history: List<DayResult> = emptyList(),
     strains: Map<Long, String> = emptyMap(),
+    profile: BodyProfile? = null,
 ): HomeContent {
     val noSeconds = day == null || (day.strapSeconds == 0 && day.edgeSeconds == 0)
     val prior = history.filter { it.date.isBefore(date) && !it.date.isBefore(date.minusDays(30)) }
@@ -136,7 +142,7 @@ fun homeContent(
         strain = strainRing(day, noSeconds),
         sleepStartUnix = if (noSeconds) null else day?.main?.startUnix,
         activities = activitiesFor(day, date, logged, live.zone, strains),
-        dashboard = dashboard(day, noSeconds, prior),
+        dashboard = dashboard(day, noSeconds, prior, profile),
         monitor = healthMonitor(day, noSeconds, prior, live),
         sampleBanner = live.sampleBanner,
     )
@@ -247,6 +253,7 @@ internal fun activitiesFor(
         } else {
             strains[card.startUnix] ?: "--"
         }
+        val strain = strains[card.startUnix]?.toFloatOrNull()
         HomeActivity(
             card = card,
             tile = tile,
@@ -254,6 +261,7 @@ internal fun activitiesFor(
             startLabel = clock(card.startUnix, zone),
             endLabel = clock(card.endUnix, zone),
             dayPrefix = previousDayPrefix(card.startUnix, date, zone),
+            intensity = if (strain == null) 0.35f else (strain / 21f).coerceIn(0f, 1f),
         )
     }
 }
@@ -335,11 +343,16 @@ private fun blankRing(title: String) = SummaryRingModel(
 /**
  * Cards that can be computed from stored history.
  *
- * Calories are left out. Layout 18 has no energy field, and a calorie
- * estimate would need body mass, which Pulse does not store. Edge workout
- * calories are not used as a Pulse total.
+ * VO2 max and calories use the published estimates in the metrics module.
+ * They stay blank until More has a body profile. Edge workout calories are
+ * not used as a Pulse total.
  */
-private fun dashboard(day: DayResult?, noSeconds: Boolean, prior: List<DayResult>): List<DashboardCard> {
+private fun dashboard(
+    day: DayResult?,
+    noSeconds: Boolean,
+    prior: List<DayResult>,
+    profile: BodyProfile?,
+): List<DashboardCard> {
     if (day == null || noSeconds) return emptyList()
     val cards = ArrayList<DashboardCard>()
     val rmssd = day.rhythm?.rmssdMs
@@ -414,7 +427,38 @@ private fun dashboard(day: DayResult?, noSeconds: Boolean, prior: List<DayResult
             note = "8h reference",
         )
     }
+    cards += vo2Card(day, profile)
+    cards += calorieCard(day, profile)
     return cards
+}
+
+private const val PROFILE_NOTE: String = "Add age, sex, height, and weight in More"
+
+private fun vo2Card(day: DayResult, profile: BodyProfile?): DashboardCard {
+    val resting = day.rhythm?.restingHr
+    val vo2 = if (profile != null && resting != null) uthVo2Max(profile.ageYears, resting) else null
+    val value = vo2?.let { String.format(Locale.US, "%.1f", it) } ?: "--"
+    val note = when {
+        profile == null -> PROFILE_NOTE
+        resting == null -> "Needs a resting heart rate"
+        else -> "Uth estimate"
+    }
+    return DashboardCard("VO2 MAX", value, null, null, "dash_vo2", note)
+}
+
+private fun calorieCard(day: DayResult, profile: BodyProfile?): DashboardCard {
+    val kcal = if (profile != null && profile.valid()) {
+        estimatedDayKcal(profile, day.meanHeartBpm, day.heartSeconds, day.rhythm?.restingHr)
+    } else {
+        null
+    }
+    val value = kcal?.let { String.format(Locale.US, "%,d", it.roundToInt()) } ?: "--"
+    val note = when {
+        profile == null || !profile.valid() -> PROFILE_NOTE
+        day.meanHeartBpm == null -> "Resting expenditure"
+        else -> "Mifflin + Keytel"
+    }
+    return DashboardCard("CALORIES", value, null, null, "dash_calories", note)
 }
 
 private fun healthMonitor(

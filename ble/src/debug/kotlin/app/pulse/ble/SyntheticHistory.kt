@@ -98,18 +98,28 @@ internal class SyntheticHistory(
     }
 
     private fun nightSample(index: Int, segment: Segment, second: Int): SyntheticSample {
-        val start = segment.day.minusDays(1).atTime(23, 0).atZone(zone).toEpochSecond()
-        val heart = 48 + (mix(seed, index) % 7)
+        val extraMinutes = if (segment.stepDay == NIGHT_COUNT - 1) 0 else 15 + (segment.stepDay % 5) * 18
+        val start = segment.day.minusDays(1).atTime(22, 0).plusMinutes(extraMinutes.toLong()).atZone(zone).toEpochSecond()
+        val phase = second % (90 * 60)
+        val heart = when {
+            phase < 20 * 60 -> 46 + (mix(seed, index) % 3)
+            phase < 50 * 60 -> 52 + (mix(seed, index) % 4)
+            phase < 70 * 60 -> if (second % 2 == 0) 56 else 60
+            else -> 50 + (mix(seed, index) % 4)
+        }
+        val wake = second in 40 * 60 until 40 * 60 + 45 ||
+            second in 3 * 3600 until 3 * 3600 + 40 ||
+            second in 5 * 3600 until 5 * 3600 + 50
         val wave = sin(2.0 * PI * (second % 4) / 4.0)
         val noise = (mix(seed, index xor 0x5A5A) % 11) - 5
         val rr = (1024.0 + wave * 50.0 + noise).toInt()
         return SyntheticSample(
             unixSeconds = start + second,
-            heartRate = heart,
+            heartRate = if (wake) 74 + (mix(seed, index) % 6) else heart,
             rrTick = rr,
             steps = daySteps[segment.stepDay][DAY_MINUTES - 1],
             activity = 0,
-            motion = 0x20.toByte(),
+            motion = if (wake) 0x00.toByte() else 0x20.toByte(),
             skinTempRaw = 3320 + segment.stepDay * 15,
         )
     }
