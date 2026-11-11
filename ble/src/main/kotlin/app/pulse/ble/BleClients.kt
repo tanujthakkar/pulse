@@ -14,7 +14,7 @@ object BleClients {
     const val LOG_TAG: String = "PulseGatt"
 
     fun strapScanner(context: Context, events: ScanEvents): StrapScanner {
-        return StrapScanner(AndroidScanPort(context.applicationContext), events)
+        return StrapScanner(PlatformRadios.scanPort(context), events)
     }
 
     fun gattSession(
@@ -25,7 +25,7 @@ object BleClients {
     ): GattSession {
         val appContext = context.applicationContext
         return GattSession(
-            radio = AndroidGattRadio(appContext),
+            radio = PlatformRadios.gattRadio(appContext),
             events = events,
             alarms = SystemAlarmClock(),
             log = OpLogger { line -> Log.i(LOG_TAG, line) },
@@ -37,7 +37,7 @@ object BleClients {
     fun bondController(context: Context, events: BondEvents): BondController {
         val appContext = context.applicationContext
         return BondController(
-            port = AndroidBondPort(appContext),
+            port = PlatformRadios.bondPort(appContext),
             events = events,
         )
     }

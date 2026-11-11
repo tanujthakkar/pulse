@@ -50,10 +50,22 @@ fun HomeScreen(
     onSaveActivity: (Long?, String, LocalTime, LocalTime) -> Unit,
     onDeleteActivity: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    initiallyShowCalendar: Boolean = false,
+    initiallyEditing: Boolean = false,
 ) {
-    var calendarOpen by remember { mutableStateOf(false) }
-    var visibleMonth by remember { mutableStateOf<YearMonth?>(null) }
-    var editor by remember { mutableStateOf<EditorState?>(null) }
+    var calendarOpen by remember { mutableStateOf(initiallyShowCalendar) }
+    var visibleMonth by remember {
+        mutableStateOf(if (initiallyShowCalendar) content?.let { YearMonth.from(it.date) } else null)
+    }
+    var editor by remember {
+        mutableStateOf(
+            if (initiallyEditing) {
+                EditorState(type = "Run", startHour = "7", startMinute = "30", endHour = "8", endMinute = "15")
+            } else {
+                null
+            },
+        )
+    }
     Column(
         modifier
             .fillMaxSize()

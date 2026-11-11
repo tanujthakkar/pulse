@@ -3,6 +3,7 @@ package app.pulse
 import android.app.Application
 import app.pulse.link.AutoSyncCoordinator
 import app.pulse.link.ConnectedLinkHost
+import app.pulse.link.StrapLink
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -10,6 +11,7 @@ import javax.inject.Inject
 class PulseApp : Application() {
     @Inject lateinit var connectedLink: ConnectedLinkHost
     @Inject lateinit var autoSync: AutoSyncCoordinator
+    @Inject lateinit var strapLink: StrapLink
 
     override fun onCreate() {
         super.onCreate()
@@ -18,5 +20,6 @@ class PulseApp : Application() {
         // pause, or leave.
         connectedLink.arm()
         autoSync.start()
+        autostartSimulatedStrap(this, strapLink)
     }
 }

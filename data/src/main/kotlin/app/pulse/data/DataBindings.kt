@@ -19,7 +19,7 @@ object DataBindings {
         // The device row is one short read. Callers may read it on the main
         // thread. Sync commits go through RoomSyncStore, which does not use
         // this shortcut.
-        return Room.databaseBuilder(context, PulseDatabase::class.java, "pulse.db")
+        return Room.databaseBuilder(context, PulseDatabase::class.java, PulseStoreFiles.name(context))
             .addMigrations(
                 PulseMigrations.FROM_1_TO_2,
                 PulseMigrations.FROM_2_TO_3,

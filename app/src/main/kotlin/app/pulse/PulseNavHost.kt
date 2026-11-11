@@ -18,7 +18,7 @@ import app.pulse.feature.home.PulsePalette
 import app.pulse.feature.home.activityRoute
 
 @Composable
-fun PulseNavHost() {
+fun PulseNavHost(onSimulationChanged: () -> Unit = {}) {
     val navController = rememberNavController()
     Box(
         Modifier
@@ -43,6 +43,7 @@ fun PulseNavHost() {
                     onConnect = { navController.navigate(PulseRoute.Connect.route) },
                     onDebug = { navController.navigate(PulseRoute.Debug.route) },
                     onImport = { navController.navigate(IMPORT_ROUTE) },
+                    onSimulationChanged = onSimulationChanged,
                 )
             }
             composable(PulseRoute.Connect.route) { ConnectRoute() }

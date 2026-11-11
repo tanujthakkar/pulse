@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.paparazzi)
 }
 
 android {
@@ -15,8 +16,8 @@ android {
         applicationId = "app.pulse"
         minSdk = 31
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.1.10"
+        versionCode = 12
+        versionName = "0.1.11"
         testInstrumentationRunner = "app.pulse.PulseTestRunner"
     }
     buildFeatures {
@@ -46,6 +47,7 @@ android {
         checkReleaseBuilds = false
     }
     testOptions {
+        unitTests.isIncludeAndroidResources = true
         unitTests.all { it.useJUnitPlatform() }
     }
 }
@@ -64,6 +66,7 @@ dependencies {
     implementation(project(":feature:edgeimport"))
     implementation(project(":link"))
     implementation(project(":data"))
+    implementation(project(":ble"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -77,7 +80,9 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit4)
     testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.junit.vintage.engine)
 
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
@@ -131,9 +136,22 @@ androidComponents {
     }
 }
 
+tasks.register<Copy>("exportScreenshots") {
+    group = "verification"
+    description = "Copy Paparazzi PNGs to app/build/outputs/screenshots."
+    from(rootProject.file("feature/home/src/test/snapshots"))
+    from(file("src/test/snapshots"))
+    include("**/*.png")
+    into(layout.buildDirectory.dir("outputs/screenshots"))
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    dependsOn(":feature:home:verifyPaparazziDebug")
+    dependsOn("verifyPaparazziDebug")
+}
+
 afterEvaluate {
     tasks.named("check").configure {
         dependsOn(tasks.matching { it.name.endsWith("ManifestHasNoInternet") })
         dependsOn(tasks.matching { it.name.endsWith("ManifestHasNoLocation") })
+        dependsOn("exportScreenshots")
     }
 }

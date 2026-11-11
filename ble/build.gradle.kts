@@ -18,6 +18,7 @@ android {
         checkReleaseBuilds = false
     }
     testOptions {
+        unitTests.isIncludeAndroidResources = true
         unitTests.all { it.useJUnitPlatform() }
     }
 }
@@ -32,5 +33,9 @@ dependencies {
     implementation(project(":wire"))
     implementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.junit.vintage.engine)
 }
