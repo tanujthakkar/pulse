@@ -1,6 +1,8 @@
 package app.pulse.link
 
+import android.Manifest
 import android.app.Activity
+import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
@@ -49,6 +51,15 @@ import org.robolectric.shadows.ShadowService
 class StrapLinkServiceTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private var controller: ServiceController<StrapLinkService>? = null
+
+    @org.junit.Before
+    fun grantBluetooth() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(app).grantPermissions(
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_SCAN,
+        )
+    }
 
     @After
     fun tearDown() {
@@ -100,6 +111,30 @@ class StrapLinkServiceTest {
         assertEquals(0, foregroundType(shadow))
         fx.link.stop()
         assertTrue(shadow.isForegroundStopped)
+    }
+
+    @Test
+    fun missingBluetoothPermissionDoesNotCallStartForeground() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(app).denyPermissions(
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_SCAN,
+        )
+        var rejected = false
+        val fx = linked()
+        LinkServiceHooks.deps = LinkServiceDeps(
+            link = fx.link,
+            sync = fx.sync,
+            notifications = LinkNotifications(context),
+            onForegroundRejected = { rejected = true },
+        )
+        val created = Robolectric.buildService(StrapLinkService::class.java).create()
+        controller = created
+        val service = created.startCommand(0, 0).get()
+        val shadow = shadowOf(service)
+        assertTrue(rejected)
+        assertTrue(shadow.isStoppedBySelf)
+        assertFalse(shadow.isLastForegroundNotificationAttached)
     }
 
     @Test

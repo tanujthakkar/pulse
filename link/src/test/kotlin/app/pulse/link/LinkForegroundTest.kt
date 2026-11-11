@@ -102,6 +102,43 @@ class LinkForegroundTest {
     }
 
     @Test
+    fun missingBluetoothPermissionDoesNotStartTheServiceUntilItIsGranted() {
+        val link = StrapLink(presentPorts(), idleClock())
+        var starts = 0
+        var allowed = false
+        val host = ConnectedLinkHost(
+            link,
+            promote = { starts += 1 },
+            release = {},
+            log = {},
+            mayPromote = { allowed },
+        )
+        link.start()
+        assertEquals(LinkPhase.SCANNING, link.snapshot().phase)
+        assertEquals(0, starts)
+        assertFalse(host.holding)
+
+        allowed = true
+        host.onPermissionsChanged()
+        assertEquals(1, starts)
+        assertTrue(host.holding)
+    }
+
+    @Test
+    fun securityExceptionFromTheForegroundStartDoesNotEscape() {
+        val link = StrapLink(presentPorts(), idleClock())
+        val host = ConnectedLinkHost(
+            link,
+            promote = { throw SecurityException("bluetooth") },
+            release = {},
+            log = {},
+        )
+        link.start()
+        assertEquals(LinkPhase.SCANNING, link.snapshot().phase)
+        assertFalse(host.holding)
+    }
+
+    @Test
     fun pairingHelpAndARejectedStartReleaseTheService() {
         val refused = StrapLink(
             presentPorts(bond = DeviceBond.ABSENT, begin = BondBegin.REFUSED),

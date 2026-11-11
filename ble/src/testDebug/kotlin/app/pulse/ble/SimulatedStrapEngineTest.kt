@@ -175,13 +175,15 @@ class SimulatedStrapEngineTest {
     }
 
     @Test
-    fun liveHeartRateMoves() {
+    fun liveHeartRateMovesSlowly() {
+        val beats = (0 until 120).map { SimulatedStrapEngine.heartRateBpm(it) }
+        assertTrue(beats.all { it in 54..90 })
+        val steps = beats.zipWithNext { a, b -> kotlin.math.abs(a - b) }
+        assertTrue(steps.max() <= 6)
+        assertTrue(beats.max() - beats.min() >= 6)
         val first = SimulatedStrapEngine.heartRateNotification(0)
-        val second = SimulatedStrapEngine.heartRateNotification(1)
         assertEquals(0, first[0].toInt())
-        assertTrue(first[1].toInt() in 58..78)
-        assertTrue(second[1].toInt() in 58..78)
-        assertNotEquals(first[1], second[1])
+        assertEquals(beats.first(), first[1].toInt())
     }
 
     private fun engine(scenario: StrapScenario) = SimulatedStrapEngine(

@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag as semanticsTag
@@ -102,7 +103,7 @@ private fun HeartRateBlock(model: HealthMonitorModel) {
         Text(
             model.bpmText,
             color = PulsePalette.text,
-            fontSize = 48.sp,
+            fontSize = 40.sp,
             fontWeight = FontWeight.Light,
             modifier = Modifier.testTag("health_hr"),
         )
@@ -122,7 +123,7 @@ private fun HeartTrace(points: List<HeartPoint>) {
     Canvas(
         Modifier
             .fillMaxWidth()
-            .height(112.dp)
+            .height(88.dp)
             .testTag("health_trace"),
     ) {
         val grid = PulsePalette.track
@@ -135,13 +136,14 @@ private fun HeartTrace(points: List<HeartPoint>) {
         val max = (points.maxOf { it.bpm } + 8).coerceAtMost(220).toFloat().coerceAtLeast(min + 1f)
         val start = points.first().tMillis
         val span = (points.last().tMillis - start).coerceAtLeast(1L).toFloat()
-        val path = Path()
-        points.forEachIndexed { index, point ->
-            val x = (point.tMillis - start) / span * size.width
-            val y = size.height - (point.bpm - min) / (max - min) * size.height
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        val plotted = points.map { point ->
+            Offset(
+                x = (point.tMillis - start) / span * size.width,
+                y = size.height - (point.bpm - min) / (max - min) * size.height,
+            )
         }
-        drawPath(path, PulsePalette.green, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        val path = Path().apply { smoothThrough(plotted) }
+        drawPath(path, PulsePalette.green, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
     }
 }
 
@@ -149,10 +151,10 @@ private fun HeartTrace(points: List<HeartPoint>) {
 private fun MonitorGrid(model: HealthMonitorModel) {
     val cards = listOf(
         MonitorCard("RESPIRATORY RATE", model.respiratory, PulseMark.LUNGS, "health_rr"),
-        MonitorCard("BLOOD OXYGEN (SPO2)", model.spo2, PulseMark.DROP, "health_spo2"),
+        MonitorCard("BLOOD OXYGEN", model.spo2, PulseMark.DROP, "health_spo2", detail = "SPO2"),
         MonitorCard("RHR", model.rhr, PulseMark.HEART, "health_rhr"),
         MonitorCard("HRV", model.hrv, PulseMark.PULSE, "health_hrv"),
-        MonitorCard("SKIN TEMP (FROM BASELINE)", model.skin, PulseMark.THERMOMETER, "health_temp"),
+        MonitorCard("SKIN TEMP", model.skin, PulseMark.THERMOMETER, "health_temp", detail = "FROM BASELINE"),
     )
     Column(verticalArrangement = Arrangement.spacedBy(PulseSpace.sm)) {
         cards.chunked(2).forEach { row ->
@@ -169,28 +171,54 @@ private data class MonitorCard(
     val value: MetricValue,
     val mark: PulseMark,
     val tag: String,
+    val detail: String? = null,
 )
 
 @Composable
 private fun MonitorTile(card: MonitorCard, modifier: Modifier) {
     Column(
         modifier
+            .height(168.dp)
             .semantics(mergeDescendants = true) { semanticsTag = card.tag }
             .background(PulsePalette.surface, RoundedCornerShape(18.dp))
-            .padding(PulseSpace.md),
+            .padding(horizontal = PulseSpace.md, vertical = PulseSpace.sm),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(PulseSpace.sm), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(PulseSpace.sm), verticalAlignment = Alignment.Top) {
             PulseIcon(card.mark, PulsePalette.muted, Modifier.size(16.dp))
-            Text(card.name, color = PulsePalette.text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+            Column {
+                Text(
+                    card.name,
+                    color = PulsePalette.text,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.6.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (card.detail != null) {
+                    Text(
+                        card.detail,
+                        color = PulsePalette.muted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.4.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         Column(verticalArrangement = Arrangement.spacedBy(PulseSpace.xs)) {
             Text(
                 card.value.text,
                 color = PulsePalette.text,
-                fontSize = 28.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.Light,
             )
+            val unit = card.value.unit
+            if (unit != null) {
+                Text(unit, color = PulsePalette.muted, fontSize = PulseType.label, fontWeight = FontWeight.Medium)
+            }
             if (!card.value.available) {
                 Text(
                     "No data",
@@ -203,4 +231,18 @@ private fun MonitorTile(card: MonitorCard, modifier: Modifier) {
             }
         }
     }
+}
+
+private fun Path.smoothThrough(points: List<Offset>) {
+    moveTo(points.first().x, points.first().y)
+    if (points.size == 2) {
+        lineTo(points[1].x, points[1].y)
+        return
+    }
+    for (index in 1 until points.lastIndex) {
+        val midX = (points[index].x + points[index + 1].x) / 2f
+        val midY = (points[index].y + points[index + 1].y) / 2f
+        quadraticTo(points[index].x, points[index].y, midX, midY)
+    }
+    lineTo(points.last().x, points.last().y)
 }

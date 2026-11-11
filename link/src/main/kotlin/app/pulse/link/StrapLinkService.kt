@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
+import app.pulse.ble.BleClients
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -33,6 +35,7 @@ class StrapLinkService : Service() {
     private var link: StrapLink? = null
     private var sync: HistorySyncHost? = null
     private var notifications: LinkNotifications? = null
+    private var onForegroundRejected: () -> Unit = {}
     private var destroyed = false
     private var foreground = false
     private var linkListener: ((LinkSnapshot) -> Unit)? = null
@@ -46,6 +49,7 @@ class StrapLinkService : Service() {
         link = deps.link
         sync = deps.sync
         notifications = deps.notifications
+        onForegroundRejected = deps.onForegroundRejected
         retainedSync = deps.sync
         linkListener = { render() }
         link?.watch(linkListener!!)
@@ -83,16 +87,28 @@ class StrapLinkService : Service() {
     }
 
     private fun startInForeground(notification: android.app.Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                LinkNotifications.NOTE_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        } else {
-            startForeground(LinkNotifications.NOTE_ID, notification)
+        if (!LinkRuntimePermission.bluetoothGranted(this)) {
+            Log.i(BleClients.LOG_TAG, "foreground link skipped: bluetooth permission is missing")
+            onForegroundRejected()
+            stopSelf()
+            return
         }
-        foreground = true
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    LinkNotifications.NOTE_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                )
+            } else {
+                startForeground(LinkNotifications.NOTE_ID, notification)
+            }
+            foreground = true
+        } catch (error: SecurityException) {
+            Log.i(BleClients.LOG_TAG, "foreground link was not allowed: ${error.message}")
+            onForegroundRejected()
+            stopSelf()
+        }
     }
 
     private fun dropForeground() {
@@ -106,10 +122,12 @@ class StrapLinkService : Service() {
             applicationContext,
             LinkServiceEntryPoint::class.java,
         )
+        val host = entry.connectedLinkHost()
         return LinkServiceDeps(
             link = entry.strapLink(),
             sync = entry.historySyncHost(),
             notifications = entry.linkNotifications(),
+            onForegroundRejected = host::foregroundRejected,
         )
     }
 }
@@ -118,6 +136,7 @@ internal data class LinkServiceDeps(
     val link: StrapLink,
     val sync: HistorySyncHost,
     val notifications: LinkNotifications,
+    val onForegroundRejected: () -> Unit = {},
 )
 
 /**
@@ -135,4 +154,6 @@ interface LinkServiceEntryPoint {
     fun historySyncHost(): HistorySyncHost
 
     fun linkNotifications(): LinkNotifications
+
+    fun connectedLinkHost(): ConnectedLinkHost
 }

@@ -16,6 +16,8 @@ import app.pulse.metrics.SleepEpisode
 import app.pulse.metrics.Strain
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 internal val SHOT_DATE: LocalDate = LocalDate.of(2026, 5, 16)
 private val ZONE = ZoneOffset.UTC
@@ -76,7 +78,11 @@ internal fun shotDay(): HomeContent {
             batteryPercent = 76,
             lastSyncUnixSeconds = null,
             zone = ZONE,
-            trace = List(90) { index -> HeartPoint(index * 1000L, 58 + ((index * 3) % 17)) },
+            trace = List(120) { index ->
+                val slow = sin(index / 16.0) * 5.0 + sin(index / 41.0) * 2.0
+                val noise = (index * 13) % 5 - 2
+                HeartPoint(index * 1000L, (66.0 + slow + noise).roundToInt())
+            },
         ),
         history = listOf(prior),
         strains = mapOf(runStart to "8.4", danceStart to "3.1"),

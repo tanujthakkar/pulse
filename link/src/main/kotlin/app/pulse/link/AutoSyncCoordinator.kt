@@ -14,6 +14,7 @@ import app.pulse.data.DeviceDirectory
 import app.pulse.sync.AutoSync
 import app.pulse.sync.AutoSyncAction
 import app.pulse.sync.AutoSyncInput
+import app.pulse.sync.AutoSyncOutcome
 import app.pulse.sync.AutoSyncTrigger
 import app.pulse.sync.autoSyncAction
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -56,11 +57,7 @@ class AutoSyncCoordinator @Inject constructor(
     fun start() {
         if (started) return
         started = true
-        link.watch { snapshot ->
-            val linked = snapshot.phase == LinkPhase.LINKED
-            if (linked && !wasLinked) on(AutoSyncTrigger.CONNECTED)
-            wasLinked = linked
-        }
+        armLinkWatch()
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {
@@ -72,23 +69,65 @@ class AutoSyncCoordinator @Inject constructor(
         scheduleFallback()
     }
 
-    fun on(trigger: AutoSyncTrigger) {
-        when (autoSyncAction(current(trigger))) {
-            AutoSyncAction.SYNC -> {
-                lastStartMs = clock()
-                sync.syncNow()
-            }
-            AutoSyncAction.RECONNECT -> reconnect()
-            AutoSyncAction.NONE -> Unit
+    /**
+     * Watches the link without scheduling WorkManager.
+     *
+     * History is ready only after hello succeeds. [LinkPhase.LINKED] is earlier,
+     * before the command port has an address, and a start recorded at that
+     * moment never writes a clock get.
+     */
+    internal fun armLinkWatch() {
+        if (linkWatchInstalled) return
+        linkWatchInstalled = true
+        link.watch { snapshot ->
+            val linked = readyForHistory(snapshot)
+            if (linked && !wasLinked) on(AutoSyncTrigger.CONNECTED)
+            wasLinked = linked
         }
     }
 
+    /**
+     * @return what this trigger actually did. [AutoSyncOutcome.NOT_READY] means
+     * the policy asked for a sync and [HistorySyncHost.syncNow] wrote nothing.
+     * That used to be recorded as a start, so later workers returned success
+     * during the cooldown without ever syncing.
+     */
+    fun on(trigger: AutoSyncTrigger): AutoSyncOutcome {
+        return when (autoSyncAction(current(trigger))) {
+            AutoSyncAction.SYNC -> {
+                if (sync.syncNow()) {
+                    lastStartMs = clock()
+                    AutoSyncOutcome.STARTED
+                } else if (sync.running.value) {
+                    AutoSyncOutcome.IN_PROGRESS
+                } else {
+                    AutoSyncOutcome.NOT_READY
+                }
+            }
+            AutoSyncAction.RECONNECT -> {
+                reconnect()
+                AutoSyncOutcome.RECONNECTING
+            }
+            AutoSyncAction.NONE -> when {
+                sync.running.value -> AutoSyncOutcome.IN_PROGRESS
+                lastStartMs != null && readyForHistory(link.snapshot()) -> AutoSyncOutcome.COOLING_DOWN
+                else -> AutoSyncOutcome.IDLE
+            }
+        }
+    }
+
+    private var linkWatchInstalled = false
+
+    private fun readyForHistory(snapshot: LinkSnapshot): Boolean =
+        snapshot.phase == LinkPhase.LINKED && snapshot.hello == HelloProgress.SUCCEEDED
+
     private fun current(trigger: AutoSyncTrigger): AutoSyncInput {
-        val phase = link.snapshot().phase
+        val snapshot = link.snapshot()
+        val phase = snapshot.phase
         val elapsed = lastStartMs?.let { clock() - it }
         return AutoSyncInput(
             trigger = trigger,
-            linked = phase == LinkPhase.LINKED,
+            linked = readyForHistory(snapshot),
             running = sync.running.value,
             millisSinceLastStart = elapsed,
             phaseIdle = phase == LinkPhase.IDLE,

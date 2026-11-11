@@ -3,6 +3,7 @@ package app.pulse
 import android.app.Application
 import app.pulse.link.AutoSyncCoordinator
 import app.pulse.link.ConnectedLinkHost
+import app.pulse.link.LinkRuntimePermission
 import app.pulse.link.StrapLink
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -20,6 +21,8 @@ class PulseApp : Application() {
         // pause, or leave.
         connectedLink.arm()
         autoSync.start()
-        autostartSimulatedStrap(this, strapLink)
+        if (LinkRuntimePermission.bluetoothGranted(this)) {
+            autostartSimulatedStrap(this, strapLink)
+        }
     }
 }

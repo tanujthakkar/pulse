@@ -14,6 +14,8 @@ import app.pulse.wire.codec.HistoryStartCommand
 import app.pulse.wire.codec.PacketType
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Scripted strap for one debug session.
@@ -183,10 +185,20 @@ internal class SimulatedStrapEngine(
         const val FIRMWARE: String = "50.43.1.0"
         const val PARTIAL_RECORDS: Int = 40
 
-        fun heartRateNotification(tick: Int): ByteArray {
-            val bpm = 58 + ((tick * 17) % 21)
-            return byteArrayOf(0x00, bpm.toByte())
+        /**
+         * A slow resting trace plus a little noise.
+         *
+         * The earlier `(tick * 17) % 21` series was a sawtooth and drew as a
+         * zigzag. Consecutive beats stay within a few bpm.
+         */
+        fun heartRateBpm(tick: Int): Int {
+            val slow = sin(tick / 16.0) * 5.0 + sin(tick / 41.0) * 2.0
+            val noise = (tick * 13) % 5 - 2
+            return (66.0 + slow + noise).roundToInt().coerceIn(54, 90)
         }
+
+        fun heartRateNotification(tick: Int): ByteArray =
+            byteArrayOf(0x00, heartRateBpm(tick).toByte())
     }
 }
 

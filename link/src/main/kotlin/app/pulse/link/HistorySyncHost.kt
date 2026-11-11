@@ -76,9 +76,8 @@ class HistorySyncHost @Inject constructor(
         driver.publishIdle()
     }
 
-    fun syncNow() {
-        driver.syncNow()
-    }
+    /** @return true when a history attempt is running after this call. */
+    fun syncNow(): Boolean = driver.syncNow()
 
     /** Stops or resumes acknowledgement of chunks saved after this call. */
     fun setHistoryAckEnabled(enabled: Boolean) {

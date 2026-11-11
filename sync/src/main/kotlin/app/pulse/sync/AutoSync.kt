@@ -36,6 +36,21 @@ enum class AutoSyncAction {
     NONE,
 }
 
+/**
+ * What [app.pulse.link.AutoSyncCoordinator.on] did with one trigger.
+ *
+ * [NOT_READY] is a sync that was asked for and did not write. [IDLE] is a
+ * trigger with nothing to do. A worker must not report success for [NOT_READY].
+ */
+enum class AutoSyncOutcome {
+    STARTED,
+    IN_PROGRESS,
+    COOLING_DOWN,
+    RECONNECTING,
+    NOT_READY,
+    IDLE,
+}
+
 data class AutoSyncInput(
     val trigger: AutoSyncTrigger,
     val linked: Boolean,

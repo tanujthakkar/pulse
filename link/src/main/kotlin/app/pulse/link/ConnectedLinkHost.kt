@@ -21,6 +21,7 @@ class ConnectedLinkHost internal constructor(
     private val promote: () -> Unit,
     private val release: () -> Unit,
     private val log: (String) -> Unit,
+    private val mayPromote: () -> Boolean = { true },
 ) {
     @Inject
     constructor(
@@ -31,6 +32,7 @@ class ConnectedLinkHost internal constructor(
         promote = { startStrapLinkService(context) },
         release = { stopStrapLinkService(context) },
         log = { line -> Log.i(BleClients.LOG_TAG, line) },
+        mayPromote = { LinkRuntimePermission.bluetoothGranted(context) },
     )
 
     private var armed = false
@@ -54,19 +56,43 @@ class ConnectedLinkHost internal constructor(
         link.watch(::onPhase)
     }
 
+    /**
+     * Starts the foreground service after a grant, if the link already wants it.
+     *
+     * A phase change that happened while Bluetooth permission was missing does
+     * not fire again on its own.
+     */
+    fun onPermissionsChanged() {
+        onPhase(link.snapshot())
+    }
+
+    /**
+     * The service refused [startForeground] because Bluetooth was not granted.
+     * [running] is cleared so a later grant can try again.
+     */
+    internal fun foregroundRejected() {
+        running = false
+        log("foreground link waiting for bluetooth permission")
+    }
+
     private fun onPhase(snapshot: LinkSnapshot) {
-        val wanted = LinkForegroundPolicy.shouldRun(snapshot.phase)
+        val wanted = LinkForegroundPolicy.shouldRun(snapshot.phase) && mayPromote()
         if (wanted == running) return
-        running = wanted
         if (wanted) {
+            running = true
             try {
                 promote()
+                if (!running) return
                 log("foreground link start ${snapshot.phase}")
             } catch (error: IllegalStateException) {
                 running = false
                 log("foreground link start was not allowed: ${error.message}")
+            } catch (error: SecurityException) {
+                running = false
+                log("foreground link start was not allowed: ${error.message}")
             }
         } else {
+            running = false
             log("foreground link stop ${snapshot.phase}")
             release()
         }

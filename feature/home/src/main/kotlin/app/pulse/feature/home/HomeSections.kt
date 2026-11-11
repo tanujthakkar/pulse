@@ -114,8 +114,11 @@ fun SummaryRings(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier.fillMaxWidth().testTag("home_dials"),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = PulseSpace.sm)
+            .testTag("home_dials"),
+        horizontalArrangement = Arrangement.spacedBy(PulseSpace.md),
     ) {
         SummaryRing(content.sleep, "home_sleep", Modifier.weight(1f)) {
             val start = content.sleepStartUnix ?: return@SummaryRing
@@ -142,7 +145,7 @@ fun SummaryRing(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Canvas(Modifier.size(112.dp)) {
+            Canvas(Modifier.size(96.dp)) {
                 val stroke = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
                 drawArc(
                     color = PulsePalette.track,
@@ -171,7 +174,7 @@ fun SummaryRing(
             Text(
                 model.value,
                 color = PulsePalette.text,
-                fontSize = 28.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )

@@ -24,7 +24,7 @@ class HistorySyncDriverTest {
     fun syncNowWithoutALinkDoesNotWrite() {
         val link = FakeHistoryLink()
         val driver = driver(link)
-        driver.syncNow()
+        assertFalse(driver.syncNow())
         assertEquals("Link a strap before syncing.", driver.status)
         assertFalse(driver.running)
         assertTrue(link.written.isEmpty())
@@ -34,12 +34,12 @@ class HistorySyncDriverTest {
     fun syncNowSendsClockGetAndADropStopsTheAttempt() {
         val link = FakeHistoryLink(address = "AA:BB:CC:DD:EE:FF")
         val driver = driver(link)
-        driver.syncNow()
+        assertTrue(driver.syncNow())
         assertEquals("Syncing", driver.status)
         assertTrue(driver.running)
         val frame = FrameCodec.decode(link.written.single()) as DecodeResult.Ok
         assertEquals(ClockCommand.GET, frame.frame.command)
-        driver.syncNow()
+        assertFalse(driver.syncNow())
         assertEquals(1, link.written.size)
         link.down()
         assertEquals("Sync stopped.", driver.status)
@@ -51,7 +51,7 @@ class HistorySyncDriverTest {
     @Test
     fun syncNowWithoutALinkKeepsTheLastOutcomeAndReportsTheBlock() {
         val driver = driver(FakeHistoryLink())
-        driver.syncNow()
+        assertFalse(driver.syncNow())
         assertEquals("Link a strap before syncing.", driver.activity.blocked)
         assertFalse(driver.activity.running)
         assertNull(driver.activity.outcome)

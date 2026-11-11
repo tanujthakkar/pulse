@@ -78,13 +78,17 @@ class HistorySyncDriver(
         show(activity)
     }
 
-    fun syncNow() {
-        if (running) return
+    /**
+     * @return true when a history attempt is running after this call.
+     * A blank address does not count: nothing was written.
+     */
+    fun syncNow(): Boolean {
+        if (running) return false
         val address = link.address
         if (address.isNullOrBlank()) {
             status = "Link a strap before syncing."
             show(activity.copy(blocked = status, running = false))
-            return
+            return false
         }
         val created = HistorySyncEngine(
             address = address,
@@ -136,6 +140,7 @@ class HistorySyncDriver(
         )
         log("sync start")
         created.start()
+        return running
     }
 
     private fun armWatchdog() {

@@ -71,6 +71,7 @@ enum class Trend { UP, DOWN }
 data class MetricValue(
     val text: String,
     val available: Boolean,
+    val unit: String? = null,
 ) {
     companion object {
         val EMPTY = MetricValue("--", false)
@@ -393,20 +394,22 @@ private fun healthMonitor(
     live: HomeLive,
 ): HealthMonitorModel {
     val rhythm = if (noSeconds) null else day?.rhythm
-    val hrv = rhythm?.rmssdMs?.let { MetricValue(it.roundToInt().toString(), true) } ?: MetricValue.EMPTY
-    val rhr = rhythm?.restingHr?.let { MetricValue(it.toString(), true) } ?: MetricValue.EMPTY
+    val hrv = rhythm?.rmssdMs?.let { MetricValue(it.roundToInt().toString(), true, "ms") }
+        ?: MetricValue("--", false, "ms")
+    val rhr = rhythm?.restingHr?.let { MetricValue(it.toString(), true, "bpm") }
+        ?: MetricValue("--", false, "bpm")
     val breaths = day?.breathsPerMinute?.let {
-        MetricValue(String.format(Locale.US, "%.1f", it), true)
-    } ?: MetricValue.EMPTY
+        MetricValue(String.format(Locale.US, "%.1f", it), true, "br/min")
+    } ?: MetricValue("--", false, "br/min")
     val skin = skinDelta(day, prior)
     return HealthMonitorModel(
         bpmText = live.bpm?.toString() ?: "--",
         status = deviceStatus(live.phase),
         trace = if (live.bpm == null) emptyList() else live.trace,
-        respiratory = if (noSeconds) MetricValue.EMPTY else breaths,
-        spo2 = MetricValue.EMPTY,
-        rhr = if (day?.main == null) MetricValue.EMPTY else rhr,
-        hrv = if (day?.main == null) MetricValue.EMPTY else hrv,
+        respiratory = if (noSeconds) MetricValue("--", false, "br/min") else breaths,
+        spo2 = MetricValue("--", false, "%"),
+        rhr = if (day?.main == null) MetricValue("--", false, "bpm") else rhr,
+        hrv = if (day?.main == null) MetricValue("--", false, "ms") else hrv,
         skin = skin,
     )
 }
@@ -414,15 +417,15 @@ private fun healthMonitor(
 /**
  * Skin temperature versus the prior nights in the loaded window.
  *
- * Layout 18 stores a Celsius value. A percent saturation is not in that
- * record, so SpO2 stays empty. One night with no earlier skin temperature
- * has no baseline and stays empty too.
+ * Layout 18 stores a Celsius value, shown as °C. A percent saturation is not
+ * in that record, so SpO2 stays empty. One night with no earlier skin
+ * temperature has no baseline and stays empty too.
  */
 private fun skinDelta(day: DayResult?, prior: List<DayResult>): MetricValue {
-    val tonight = day?.sleepSkinTempC ?: return MetricValue.EMPTY
+    val tonight = day?.sleepSkinTempC ?: return MetricValue("--", false, "°C")
     val baseline = prior.mapNotNull { it.sleepSkinTempC }
-    if (baseline.isEmpty()) return MetricValue.EMPTY
-    return MetricValue(formatTempDelta(tonight - baseline.average()), true)
+    if (baseline.isEmpty()) return MetricValue("--", false, "°C")
+    return MetricValue(formatTempDelta(tonight - baseline.average()), true, "°C")
 }
 
 internal fun formatTempDelta(delta: Double): String {
