@@ -1,11 +1,14 @@
 package app.pulse.feature.home
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onChildren
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import app.pulse.link.LinkPhase
 import app.pulse.metrics.DayResult
 import app.pulse.metrics.Recovery
 import app.pulse.metrics.Rhythm
@@ -16,6 +19,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -31,7 +35,9 @@ class HomeScreenTest {
 
     @Test
     fun aFullDayShowsSleepThenRecoveryThenStrain() {
-        var settings = 0
+        val picks = ArrayList<LocalDate>()
+        var health = 0
+        var opened = 0
         val content = homeContent(
             day = sampleDay(recovery = 72.0, baselineDays = 4),
             date = DATE,
@@ -39,37 +45,46 @@ class HomeScreenTest {
             logged = emptyList(),
             live = sampleLive(),
         )
+        assertEquals(DialTone.YELLOW, content.recovery.tone)
+        assertEquals("94%", content.sleep.value)
         compose.setContent {
-            HomeScreen(
+            host(
                 content,
-                onOpenSettings = { settings += 1 },
-                onPickDate = {},
-                onBackToToday = {},
-                onOpenActivity = {},
-                onSaveActivity = { _, _, _, _ -> },
-                onDeleteActivity = {},
+                onPickDate = { picks += it },
+                onOpenHealth = { health += 1 },
+                onOpenActivity = { opened += 1 },
             )
         }
-        compose.onNodeWithTag("home_header").assertTextContains("Today")
-        shows("home_source", "mixed")
+        compose.onNodeWithTag("home_header").assertTextContains("SUN, NOV 8")
         val dials = compose.onNodeWithTag("home_dials").onChildren()
-        dials[0].assertTextContains("Sleep")
-        dials[0].assertTextContains("7h 30m")
-        dials[1].assertTextContains("Recovery")
-        dials[1].assertTextContains("72")
-        dials[2].assertTextContains("Strain")
+        dials[0].assertTextContains("SLEEP")
+        dials[0].assertTextContains("94%")
+        dials[1].assertTextContains("RECOVERY")
+        dials[1].assertTextContains("72%")
+        dials[2].assertTextContains("STRAIN")
         val strain = String.format(Locale.US, "%.1f", approximateStrain21(180.0))
         dials[2].assertTextContains(strain)
-        shows("home_hrv", "42 ms")
-        shows("home_rhr", "48 bpm")
-        shows("home_sleep_hours", "7h 30m")
-        shows("home_steps", "8,660")
-        shows("home_live", "— · Not connected")
-        shows("home_battery", "81%")
-        shows("home_sync", "—")
-        shows("activity_$SLEEP_START", "Sleep")
-        compose.onNodeWithTag("home_settings").performClick()
-        assertEquals(1, settings)
+        shows("dash_hrv", "42")
+        shows("dash_rhr", "48")
+        shows("dash_steps", "8,660")
+        shows("dash_sleep_debt", "0:30")
+        shows("dash_sleep_debt", "8h reference")
+        assertEquals(0, compose.onAllNodesWithTag("dash_avg_hr").fetchSemanticsNodes().size)
+        shows("activity_$SLEEP_START", "SLEEP")
+        shows("activity_$SLEEP_START", "7:30")
+        compose.onNodeWithTag("home_next").assertIsNotEnabled()
+        compose.onNodeWithTag("home_prev").performClick()
+        assertEquals(listOf(DATE.minusDays(1)), picks)
+        compose.onNodeWithTag("home_sleep").performClick()
+        compose.onNodeWithTag("home_recovery").performClick()
+        assertEquals(1, opened)
+        compose.onNodeWithTag("home_health").performClick()
+        assertEquals(1, health)
+        assertFalse(content.monitor.spo2.available)
+        assertFalse(content.monitor.respiratory.available)
+        assertFalse(content.monitor.skin.available)
+        assertTrue(content.monitor.hrv.available)
+        assertTrue(content.monitor.rhr.available)
     }
 
     @Test
@@ -82,8 +97,8 @@ class HomeScreenTest {
             live = sampleLive(),
         )
         compose.setContent { host(content) }
-        shows("home_recovery", "—")
-        shows("home_recovery", "Recovery")
+        shows("home_recovery", "--")
+        shows("home_recovery", "RECOVERY")
         shows("home_strain", "13.3")
     }
 
@@ -96,17 +111,15 @@ class HomeScreenTest {
             logged = emptyList(),
             live = sampleLive(battery = null),
         )
-        var today = 0
-        compose.setContent { host(content, onBackToToday = { today += 1 }) }
-        shows("home_source", "no data")
-        shows("home_header", "Sun, Nov 8")
-        shows("home_recovery", "—")
-        shows("home_hrv", "—")
-        shows("home_steps", "—")
-        shows("home_battery", "—")
+        val picks = ArrayList<LocalDate>()
+        compose.setContent { host(content, onPickDate = { picks += it }) }
+        shows("home_header", "SUN, NOV 8")
+        shows("home_recovery", "--")
+        shows("dash_empty", "No stored history")
         shows("activity_empty", "No activities")
-        compose.onNodeWithTag("home_today").performClick()
-        assertEquals(1, today)
+        compose.onNodeWithTag("home_prev").performClick()
+        compose.onNodeWithTag("home_next").performClick()
+        assertEquals(listOf(DATE.minusDays(1), DATE.plusDays(1)), picks)
     }
 
     @Test
@@ -129,18 +142,58 @@ class HomeScreenTest {
         assertEquals(listOf(LocalDate.of(2026, 12, 3)), picks)
     }
 
+    @Test
+    fun healthMonitorUsesComputedNightValuesAndLeavesSpo2Empty() {
+        val prior = sampleDay(recovery = 70.0, baselineDays = 4).copy(
+            date = DATE.minusDays(1),
+            sleepSkinTempC = 33.2,
+        )
+        val day = sampleDay(recovery = 72.0, baselineDays = 4).copy(
+            breathsPerMinute = 15.2,
+            sleepSkinTempC = 33.5,
+            meanHeartBpm = 72.0,
+        )
+        val content = homeContent(
+            day = day,
+            date = DATE,
+            today = DATE,
+            logged = emptyList(),
+            live = sampleLive().copy(bpm = 64, phase = LinkPhase.LINKED, trace = listOf(HeartPoint(0L, 60), HeartPoint(1000L, 64))),
+            history = listOf(prior),
+        )
+        assertEquals("64", content.monitor.bpmText)
+        assertEquals("Device connected", content.monitor.status)
+        assertEquals("15.2", content.monitor.respiratory.text)
+        assertTrue(content.monitor.respiratory.available)
+        assertFalse(content.monitor.spo2.available)
+        assertEquals("--", content.monitor.spo2.text)
+        assertEquals("48", content.monitor.rhr.text)
+        assertEquals("42", content.monitor.hrv.text)
+        assertEquals("+0.3", content.monitor.skin.text)
+        assertEquals("72", content.dashboard.first { it.tag == "dash_avg_hr" }.value)
+        compose.setContent { HealthMonitorScreen(content.monitor, onBack = {}) }
+        shows("health_hr", "64")
+        shows("health_status", "Device connected")
+        shows("health_rr", "15.2")
+        shows("health_spo2", "No data")
+        shows("health_spo2", "--")
+        shows("health_rhr", "48")
+        shows("health_hrv", "42")
+        shows("health_temp", "+0.3")
+    }
+
     @Composable
     private fun host(
         content: HomeContent,
         onPickDate: (LocalDate) -> Unit = {},
-        onBackToToday: () -> Unit = {},
+        onOpenHealth: () -> Unit = {},
+        onOpenActivity: (app.pulse.metrics.ActivityCard) -> Unit = {},
     ) {
         HomeScreen(
             content,
-            onOpenSettings = {},
             onPickDate = onPickDate,
-            onBackToToday = onBackToToday,
-            onOpenActivity = {},
+            onOpenActivity = onOpenActivity,
+            onOpenHealth = onOpenHealth,
             onSaveActivity = { _, _, _, _ -> },
             onDeleteActivity = {},
         )

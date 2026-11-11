@@ -7,8 +7,9 @@ import androidx.compose.ui.unit.sp
 /**
  * Pulse dark surfaces and the dial colors.
  *
- * Recovery green, yellow, and red are display bands for the 0–100 formula.
- * Strain is blue. Sleep is purple. None of these are a brand asset.
+ * Recovery green, yellow, and red are the summary-ring bands: below 30 red,
+ * from 30 below 75 yellow, and 75 and above green. Strain is blue. Sleep is
+ * purple. None of these are a brand asset.
  */
 object PulsePalette {
     val background: Color = Color(0xFF0E0F12)

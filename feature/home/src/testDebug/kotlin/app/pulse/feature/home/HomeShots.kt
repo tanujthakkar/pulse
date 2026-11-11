@@ -8,8 +8,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
-import app.pulse.metrics.ActivityCard
-import app.pulse.metrics.ActivityKind
 import app.pulse.metrics.ActivityWindowStats
 import app.pulse.metrics.HeartChartPoint
 import app.pulse.metrics.Rhythm
@@ -28,24 +26,13 @@ class HomeShots {
     )
 
     @Test
-    fun homeWithData() {
-        snap { HomeScreen(populated(), {}, {}, {}, {}, { _, _, _, _ -> }, {}) }
-    }
-
-    @Test
-    fun homeEmpty() {
-        snap { HomeScreen(emptyHome(), {}, {}, {}, {}, { _, _, _, _ -> }, {}) }
-    }
-
-    @Test
     fun calendarOpen() {
         snap {
             HomeScreen(
-                content = populated(),
-                onOpenSettings = {},
+                content = shotDay(),
                 onPickDate = {},
-                onBackToToday = {},
                 onOpenActivity = {},
+                onOpenHealth = {},
                 onSaveActivity = { _, _, _, _ -> },
                 onDeleteActivity = {},
                 initiallyShowCalendar = true,
@@ -57,11 +44,10 @@ class HomeShots {
     fun addActivitySheet() {
         snap {
             HomeScreen(
-                content = populated(),
-                onOpenSettings = {},
+                content = shotDay(),
                 onPickDate = {},
-                onBackToToday = {},
                 onOpenActivity = {},
+                onOpenHealth = {},
                 onSaveActivity = { _, _, _, _ -> },
                 onDeleteActivity = {},
                 initiallyEditing = true,
@@ -142,62 +128,4 @@ class HomeShots {
         }
     }
 
-    private fun populated(): HomeContent {
-        val zone = ZoneOffset.UTC
-        val sleepStart = LocalDate.of(2026, 11, 7).atTime(23, 0).toEpochSecond(zone)
-        val sleepEnd = LocalDate.of(2026, 11, 8).atTime(6, 0).toEpochSecond(zone)
-        val runStart = LocalDate.of(2026, 11, 8).atTime(7, 30).toEpochSecond(zone)
-        val runEnd = LocalDate.of(2026, 11, 8).atTime(8, 15).toEpochSecond(zone)
-        return HomeContent(
-            date = LocalDate.of(2026, 11, 8),
-            headerLabel = "Today",
-            isToday = true,
-            zone = zone,
-            sourceLabel = "strap",
-            sleep = DialModel("Sleep", "7h 0m", 7f / 8f, DialTone.PURPLE),
-            recovery = DialModel("Recovery", "72", 0.72f, DialTone.GREEN),
-            strain = DialModel("Strain", "8.4", 8.4f / 21f, DialTone.BLUE),
-            activities = listOf(
-                HomeActivity(
-                    ActivityCard(ActivityKind.SLEEP, "Sleep", sleepStart, sleepEnd, null, false),
-                    "23:00 – 06:00",
-                ),
-                HomeActivity(
-                    ActivityCard(ActivityKind.MANUAL, "Run", runStart, runEnd, 1L, false),
-                    "07:30 – 08:15",
-                ),
-            ),
-            hrv = "42 ms",
-            resting = "49 bpm",
-            sleepStat = "7h 0m",
-            steps = "7,248",
-            liveValue = "64 bpm · Connected",
-            lastSync = "08:40",
-            battery = "76%",
-            sampleBanner = null,
-        )
-    }
-
-    private fun emptyHome(): HomeContent {
-        val blank = { title: String -> DialModel(title, "—", 0f, DialTone.MUTED) }
-        return HomeContent(
-            date = LocalDate.of(2026, 11, 8),
-            headerLabel = "Today",
-            isToday = true,
-            zone = ZoneOffset.UTC,
-            sourceLabel = "no data",
-            sleep = blank("Sleep"),
-            recovery = blank("Recovery"),
-            strain = blank("Strain"),
-            activities = emptyList(),
-            hrv = "—",
-            resting = "—",
-            sleepStat = "—",
-            steps = "—",
-            liveValue = "— · Not connected",
-            lastSync = "—",
-            battery = "—",
-            sampleBanner = null,
-        )
-    }
 }

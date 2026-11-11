@@ -7,6 +7,8 @@ import app.pulse.wire.codec.HistoryRecordDecoder
 import app.pulse.wire.codec.PacketType
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.PI
+import kotlin.math.sin
 
 /**
  * Layout-18 history generated from [SEED].
@@ -71,6 +73,7 @@ internal class SyntheticHistory(
         writeU16(body, 46, sample.steps)
         body[52] = sample.activity.toByte()
         body[70] = sample.motion
+        writeU16(body, 62, sample.skinTempRaw)
         return FrameCodec.encode(
             headerWord = HeaderWord.COMMON_RESPONSE,
             packetType = PacketType.HISTORY_RECORD,
@@ -98,7 +101,9 @@ internal class SyntheticHistory(
     private fun nightSample(index: Int, segment: Segment, second: Int): SyntheticSample {
         val start = segment.day.minusDays(1).atTime(23, 0).atZone(zone).toEpochSecond()
         val heart = 48 + (mix(seed, index) % 7)
-        val rr = 1024 + (mix(seed, index xor 0x5A5A) % 81) - 40
+        val wave = sin(2.0 * PI * (second % 4) / 4.0)
+        val noise = (mix(seed, index xor 0x5A5A) % 11) - 5
+        val rr = (1024.0 + wave * 50.0 + noise).toInt()
         return SyntheticSample(
             unixSeconds = start + second,
             heartRate = heart,
@@ -106,6 +111,7 @@ internal class SyntheticHistory(
             steps = daySteps[segment.stepDay][DAY_MINUTES - 1],
             activity = 0,
             motion = 0x20.toByte(),
+            skinTempRaw = 3320 + segment.stepDay * 15,
         )
     }
 
@@ -185,6 +191,7 @@ internal class SyntheticSample(
     val steps: Int,
     val activity: Int,
     val motion: Byte,
+    val skinTempRaw: Int = 0,
 )
 
 internal fun endMetadata(chunk: Int): ByteArray =

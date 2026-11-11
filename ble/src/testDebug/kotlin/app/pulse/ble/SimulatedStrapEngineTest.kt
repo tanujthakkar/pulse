@@ -24,6 +24,7 @@ import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,11 +72,15 @@ class SimulatedStrapEngineTest {
         assertEquals(BandMotion.STILL, day.reading.bandState)
         assertTrue(day.reading.heartRateBpm!! in 25..230)
         assertTrue(day.reading.rrMillis.isEmpty())
+        assertNull(day.reading.skinTempC)
         val night = decode(history.frame(SyntheticHistory.DAY_MINUTES))
         assertEquals(BandMotion.SLEEP, night.reading.bandState)
         assertTrue(night.reading.heartRateBpm!! in 48..54)
         assertEquals(1, night.reading.rrMillis.size)
         assertTrue(night.reading.stepCounter >= 0)
+        assertEquals(33.2f, night.reading.skinTempC!!, 0.01f)
+        val next = decode(history.frame(SyntheticHistory.DAY_MINUTES + 1))
+        assertTrue(night.reading.rrMillis.single() != next.reading.rrMillis.single())
         val again = SyntheticHistory(today, ZoneOffset.UTC)
         assertTrue(history.frame(0).contentEquals(again.frame(0)))
         assertTrue(history.frame(SyntheticHistory.DAY_MINUTES).contentEquals(again.frame(SyntheticHistory.DAY_MINUTES)))

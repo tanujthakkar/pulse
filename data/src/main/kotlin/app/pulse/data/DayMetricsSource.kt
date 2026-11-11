@@ -31,6 +31,7 @@ data class R18MetricRow(
     @ColumnInfo(name = "activity_class") val activityClass: Int?,
     @ColumnInfo(name = "rest_state") val restState: Int?,
     @ColumnInfo(name = "step_counter") val stepCounter: Int,
+    @ColumnInfo(name = "skin_temp_c") val skinTempC: Float? = null,
 )
 
 /**
@@ -196,6 +197,7 @@ internal fun edgeSeconds(
             stepCounter = if (stepsKnown) row.stepCount!!.toInt() else 0,
             source = SOURCE_EDGE,
             stepsKnown = stepsKnown,
+            skinTempC = row.skinTempC?.toFloat()?.takeIf { it in 5f..45f },
         )
     }
 }
@@ -259,6 +261,7 @@ internal fun R18MetricRow.toSecondRecord(): SecondRecord {
         stepCounter = stepCounter,
         source = SOURCE_STRAP,
         stepsKnown = true,
+        skinTempC = skinTempC?.takeIf { it in 5f..45f },
     )
 }
 
@@ -269,6 +272,7 @@ data class EdgeOneHzMetricRow(
     @ColumnInfo(name = "activity_class") val activityClass: Long?,
     @ColumnInfo(name = "step_count") val stepCount: Long?,
     @ColumnInfo(name = "band_sleep_state") val bandSleepState: Long?,
+    @ColumnInfo(name = "skin_temp_c") val skinTempC: Double? = null,
 )
 
 data class EdgeRrMetricRow(

@@ -10,10 +10,13 @@ import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapLink
 import app.pulse.metrics.DayBook
 import app.pulse.metrics.LoggedActivity
+import app.pulse.metrics.activityWindow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -31,8 +34,9 @@ import kotlinx.coroutines.launch
  * from the book already loaded and does not read it again. Adding an activity
  * writes the activity row only.
  *
- * This does not send strap commands. Live bpm and battery are whatever the
- * open session has already published.
+ * This does not send strap commands. Live bpm is whatever the open session
+ * has already published on the standard heart-rate measurement. The trace is
+ * the last few minutes of those samples, kept in memory only.
  */
 @HiltViewModel
 class HomeViewModel internal constructor(
@@ -60,16 +64,28 @@ class HomeViewModel internal constructor(
     private var selected: LocalDate? = null
     private var linkState = LinkSnapshot()
     private var bpm: Int? = null
+    private var trace: List<HeartPoint> = emptyList()
+    @Volatile private var strains: Map<Long, String> = emptyMap()
     private val onLink: (LinkSnapshot) -> Unit = { next ->
         linkState = next
         publish()
     }
 
     init {
+        bpm = heart.latest.value?.bpm
+        trace = heart.recent().map { HeartPoint(it.tsMillis, it.bpm) }
         link.watch(onLink)
         viewModelScope.launch {
             heart.latest.collect { sample ->
                 bpm = sample?.bpm
+                if (sample == null) trace = emptyList()
+                publish()
+            }
+        }
+        viewModelScope.launch {
+            heart.samples.collect { sample ->
+                bpm = sample.bpm
+                trace = heart.recent().map { HeartPoint(it.tsMillis, it.bpm) }
                 publish()
             }
         }
@@ -92,6 +108,7 @@ class HomeViewModel internal constructor(
             if (generation.get() != ticket) return@execute
             snapshot = loaded
             logged = rows
+            strains = strainLabels(rows)
             if (selected == null) selected = clock()
             publish()
         }
@@ -120,6 +137,7 @@ class HomeViewModel internal constructor(
         executor.execute {
             activities.save(id, trimmed, startUnix, endUnix)
             logged = activities.all()
+            strains = strainLabels(logged)
             publish()
         }
     }
@@ -128,6 +146,7 @@ class HomeViewModel internal constructor(
         executor.execute {
             activities.delete(id)
             logged = activities.all()
+            strains = strainLabels(logged)
             publish()
         }
     }
@@ -136,6 +155,9 @@ class HomeViewModel internal constructor(
         val date = selected ?: return
         val zone = zoneOf(snapshot.book.zone)
         val day = snapshot.book.days.firstOrNull { it.date == date }
+        val history = snapshot.book.days.filter {
+            it.date.isBefore(date) && !it.date.isBefore(date.minusDays(30))
+        }
         _ui.value = homeContent(
             day = day,
             date = date,
@@ -147,8 +169,31 @@ class HomeViewModel internal constructor(
                 batteryPercent = shownBattery(linkState, snapshot.batteryPercent),
                 lastSyncUnixSeconds = snapshot.lastSyncUnixSeconds,
                 zone = zone,
+                trace = trace,
             ),
+            history = history,
+            strains = strains,
         )
+    }
+
+    private fun strainLabels(rows: List<LoggedActivity>): Map<Long, String> {
+        val zone = zoneOf(snapshot.book.zone)
+        return rows.associate { item ->
+            val label = try {
+                val day = Instant.ofEpochSecond(item.startUnix).atZone(zone).toLocalDate()
+                val resting = snapshot.book.days.firstOrNull { it.date == day }?.rhythm?.restingHr
+                val stats = activityWindow(
+                    days.windowRecords(item.startUnix, item.endUnix),
+                    item.startUnix,
+                    item.endUnix,
+                    resting,
+                )
+                stats.approximateStrain?.let { String.format(Locale.US, "%.1f", it) } ?: "--"
+            } catch (_: Exception) {
+                "--"
+            }
+            item.startUnix to label
+        }
     }
 
     override fun onCleared() {

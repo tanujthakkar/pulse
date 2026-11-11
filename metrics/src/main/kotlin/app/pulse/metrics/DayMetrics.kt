@@ -31,6 +31,8 @@ data class SecondRecord(
     val source: String = SOURCE_STRAP,
     val stepsKnown: Boolean = true,
     val edgeWindowSleep: Boolean = false,
+    /** Layout-18 skin temperature in °C when the decoded value is inside 5..45. */
+    val skinTempC: Float? = null,
 )
 
 const val SOURCE_STRAP: String = "strap"
@@ -153,6 +155,15 @@ data class DayResult(
     val edgeAcceptedRrSeconds: Int,
     val sleepDetection: String,
     val edgeNote: EdgeDayNote?,
+    /** Mean of this calendar day's heart-rate samples. Not the sleep-only mean. */
+    val meanHeartBpm: Double? = null,
+    /**
+     * Breaths per minute from respiratory sinus arrhythmia on the main
+     * night's RR intervals, or null when that series cannot support a rate.
+     */
+    val breathsPerMinute: Double? = null,
+    /** Mean layout-18 skin temperature during the main night, when enough samples exist. */
+    val sleepSkinTempC: Double? = null,
 )
 
 data class Recovery(
@@ -508,6 +519,19 @@ private fun dayResult(
         }
     }
     val daySteps = steps.filter { it.date == date }
+    val hearts = mine.mapNotNull { it.heartRateBpm }
+    val meanHeart = if (hearts.isEmpty()) null else hearts.average()
+    val sleepSamples = if (main == null) {
+        emptyList()
+    } else {
+        samples.filter {
+            it.unixSeconds in main.startUnix..main.endUnix &&
+                (it.bandMotion == DayRules.SLEEP || it.edgeWindowSleep)
+        }.sortedBy { it.unixSeconds }
+    }
+    val breaths = respiratoryRateFromRr(sleepSamples.flatMap { it.rrMillis })
+    val temps = sleepSamples.mapNotNull { sample -> sample.skinTempC?.takeIf { it in 5f..45f } }
+    val skin = if (temps.size < 30) null else temps.sumOf { it.toDouble() } / temps.size
     return DayResult(
         date = date,
         daySeconds = daySeconds,
@@ -549,6 +573,9 @@ private fun dayResult(
         },
         sleepDetection = sleepDetection(mine),
         edgeNote = edgeScores.filter { it.dayId == date.toString() }.maxByOrNull { it.algoVersion },
+        meanHeartBpm = meanHeart,
+        breathsPerMinute = breaths,
+        sleepSkinTempC = skin,
     )
 }
 
@@ -597,6 +624,49 @@ fun approximateStrain21(trimp: Double): Double {
     if (trimp <= 0.0) return 0.0
     val scaled = 21.0 * (1.0 - exp(-trimp / DayRules.STRAIN_DIAL_TRIMP))
     return scaled.coerceIn(0.0, 21.0)
+}
+
+/**
+ * Breaths per minute from respiratory sinus arrhythmia on RR intervals.
+ *
+ * This is not a stored respiratory channel. Local peaks in the RR tachogram
+ * that rise at least 8 ms above a nearby mean, and that sit at least 2 seconds
+ * apart, are counted as breaths. The rate is `60 * (peaks - 1) / span`.
+ * The result is kept only for 8..30 breaths/min when at least 8 peaks span
+ * 60 seconds. Anything flatter, shorter, or outside that range is null.
+ */
+fun respiratoryRateFromRr(intervalsMs: List<Int>): Double? {
+    val accepted = intervalsMs.filter { it in DayRules.RR_MIN_MS..DayRules.RR_MAX_MS }
+    if (accepted.size < 30) return null
+    val time = DoubleArray(accepted.size)
+    var cursor = 0.0
+    for (index in accepted.indices) {
+        cursor += accepted[index] / 1000.0
+        time[index] = cursor
+    }
+    val peaks = ArrayList<Int>()
+    for (index in 1 until accepted.lastIndex) {
+        val value = accepted[index]
+        if (value <= accepted[index - 1] || value < accepted[index + 1]) continue
+        var sum = 0.0
+        var count = 0
+        val from = (index - 8).coerceAtLeast(0)
+        val to = (index + 8).coerceAtMost(accepted.lastIndex)
+        for (neighbor in from..to) {
+            sum += accepted[neighbor]
+            count += 1
+        }
+        if (value - sum / count < 8.0) continue
+        val last = peaks.lastOrNull()
+        if (last != null && time[index] - time[last] < 2.0) continue
+        peaks += index
+    }
+    if (peaks.size < 8) return null
+    val span = time[peaks.last()] - time[peaks.first()]
+    if (span < 60.0) return null
+    val rate = 60.0 * (peaks.size - 1) / span
+    if (rate !in 8.0..30.0) return null
+    return rate
 }
 
 private fun spanOf(samples: List<SecondRecord>): Span? {

@@ -8,21 +8,22 @@ import app.pulse.metrics.ActivityCard
 
 @Composable
 fun HomeRoute(
-    onOpenSettings: () -> Unit,
     onOpenActivity: (ActivityCard) -> Unit,
+    onOpenHealth: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val content by viewModel.ui.collectAsState()
     HomeScreen(
         content = content,
-        onOpenSettings = onOpenSettings,
         onPickDate = viewModel::pick,
-        onBackToToday = viewModel::backToToday,
         onOpenActivity = onOpenActivity,
+        onOpenHealth = onOpenHealth,
         onSaveActivity = viewModel::saveActivity,
         onDeleteActivity = viewModel::deleteActivity,
     )
 }
+
+const val HEALTH_ROUTE: String = "health"
 
 fun activityRoute(card: ActivityCard): String =
     "activity/${card.kind.name}/${card.startUnix}/${card.endUnix}"

@@ -156,13 +156,13 @@ interface EdgeImportDao {
     fun edgeHeartRate(startMs: Long, endMs: Long): EdgeHeartRateHit?
 
     @Query(
-        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state " +
+        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state, skin_temp_c " +
             "FROM edge_onehz WHERE source = :source ORDER BY ts_ms ASC",
     )
     fun metricOneHz(source: String): List<EdgeOneHzMetricRow>
 
     @Query(
-        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state " +
+        "SELECT ts_ms, hr, hr_valid, activity_class, step_count, band_sleep_state, skin_temp_c " +
             "FROM edge_onehz WHERE source = :source AND ts_ms >= :startMs AND ts_ms < :endMs " +
             "ORDER BY ts_ms ASC",
     )

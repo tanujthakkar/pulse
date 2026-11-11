@@ -9,6 +9,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HomePlanTest {
@@ -34,6 +35,8 @@ class HomePlanTest {
         )
         assertEquals(listOf("Sleep", "Run"), rows.map { it.card.title })
         assertEquals(listOf(null, 2L), rows.map { it.card.manualId })
+        assertEquals("[Sat]", rows.first().dayPrefix)
+        assertNull(rows[1].dayPrefix)
     }
 
     @Test

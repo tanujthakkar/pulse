@@ -1,8 +1,6 @@
 package app.pulse.feature.home
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -24,16 +21,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag as semanticsTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.pulse.metrics.ActivityCard
-import app.pulse.metrics.ActivityKind
 import java.time.Instant
 import java.time.LocalTime
 import java.time.YearMonth
@@ -43,10 +36,9 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     content: HomeContent?,
-    onOpenSettings: () -> Unit,
     onPickDate: (java.time.LocalDate) -> Unit,
-    onBackToToday: () -> Unit,
     onOpenActivity: (ActivityCard) -> Unit,
+    onOpenHealth: () -> Unit,
     onSaveActivity: (Long?, String, LocalTime, LocalTime) -> Unit,
     onDeleteActivity: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -72,44 +64,23 @@ fun HomeScreen(
             .background(PulsePalette.background)
             .verticalScroll(rememberScrollState())
             .padding(PulseSpace.md)
+            .padding(bottom = 88.dp)
             .testTag("home_screen"),
-        verticalArrangement = Arrangement.spacedBy(PulseSpace.md),
+        verticalArrangement = Arrangement.spacedBy(PulseSpace.lg),
     ) {
-        Box(Modifier.fillMaxWidth()) {
-            TextButton(
-                onClick = onOpenSettings,
-                modifier = Modifier.align(Alignment.CenterStart).testTag("home_settings"),
-            ) {
-                Text("⚙", color = PulsePalette.text)
-            }
-            TextButton(
-                onClick = {
-                    if (content != null) {
-                        visibleMonth = YearMonth.from(content.date)
-                        calendarOpen = !calendarOpen
-                    }
-                },
-                modifier = Modifier.align(Alignment.Center).testTag("home_header"),
-            ) {
-                Text(
-                    content?.headerLabel ?: "Today",
-                    color = PulsePalette.text,
-                    fontSize = PulseType.title,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            if (content != null && !content.isToday) {
-                TextButton(
-                    onClick = {
-                        calendarOpen = false
-                        onBackToToday()
-                    },
-                    modifier = Modifier.align(Alignment.CenterEnd).testTag("home_today"),
-                ) {
-                    Text("Today", color = PulsePalette.text)
+        DateHeader(
+            label = content?.headerLabel ?: "--",
+            previousEnabled = content != null,
+            nextEnabled = content != null && !content.isToday,
+            onPrevious = { content?.let { onPickDate(it.date.minusDays(1)) } },
+            onNext = { content?.let { onPickDate(it.date.plusDays(1)) } },
+            onOpenCalendar = {
+                if (content != null) {
+                    visibleMonth = YearMonth.from(content.date)
+                    calendarOpen = !calendarOpen
                 }
-            }
-        }
+            },
+        )
         if (content == null) {
             Text(
                 "Reading stored history.",
@@ -133,126 +104,57 @@ fun HomeScreen(
         if (banner != null) {
             Text(banner, color = PulsePalette.yellow, fontSize = PulseType.label, modifier = Modifier.testTag("home_sample"))
         }
-        Text(
-            content.sourceLabel,
-            color = PulsePalette.muted,
-            fontSize = PulseType.label,
-            modifier = Modifier.testTag("home_source"),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().testTag("home_dials"),
-            horizontalArrangement = Arrangement.spacedBy(PulseSpace.sm),
-        ) {
-            PulseDial(content.sleep, Modifier.weight(1f), "home_sleep")
-            PulseDial(content.recovery, Modifier.weight(1f), "home_recovery")
-            PulseDial(content.strain, Modifier.weight(1f), "home_strain")
-        }
-        ActivitySection(
+        SummaryRings(content, onOpenActivity)
+        HealthMonitorButton(onOpenHealth)
+        MyDayBlock(
             content = content,
-            editor = editor,
-            onEditor = { editor = it },
-            onOpenActivity = onOpenActivity,
-            onSaveActivity = onSaveActivity,
-            onDeleteActivity = onDeleteActivity,
-        )
-        MetricCard("HRV", content.hrv, "home_hrv")
-        MetricCard("Resting HR", content.resting, "home_rhr")
-        MetricCard("Sleep", content.sleepStat, "home_sleep_hours")
-        MetricCard("Steps", content.steps, "home_steps")
-        MetricCard("Live", content.liveValue, "home_live")
-        MetricCard("Battery", content.battery, "home_battery")
-        MetricCard("Last sync", content.lastSync, "home_sync")
-    }
-}
-
-@Composable
-private fun ActivitySection(
-    content: HomeContent,
-    editor: EditorState?,
-    onEditor: (EditorState?) -> Unit,
-    onOpenActivity: (ActivityCard) -> Unit,
-    onSaveActivity: (Long?, String, LocalTime, LocalTime) -> Unit,
-    onDeleteActivity: (Long) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(PulseSpace.sm), modifier = Modifier.testTag("home_activities")) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Activities", color = PulsePalette.text, fontSize = PulseType.body, fontWeight = FontWeight.SemiBold)
-            TextButton(onClick = { onEditor(EditorState()) }, modifier = Modifier.testTag("activity_add")) {
-                Text("Add", color = PulsePalette.text)
-            }
-        }
-        if (editor != null) {
-            ActivityEditor(
-                state = editor,
-                onChange = onEditor,
-                onSave = { id, type, start, end ->
-                    onSaveActivity(id, type, start, end)
-                    onEditor(null)
-                },
-                onCancel = { onEditor(null) },
-            )
-        }
-        if (content.activities.isEmpty()) {
-            Text("No activities this day.", color = PulsePalette.muted, fontSize = PulseType.body, modifier = Modifier.testTag("activity_empty"))
-        }
-        content.activities.forEach { row ->
-            ActivityRow(
-                row = row,
-                onOpen = { onOpenActivity(row.card) },
-                onEdit = {
-                    val start = Instant.ofEpochSecond(row.card.startUnix).atZone(content.zone).toLocalTime()
-                    val end = Instant.ofEpochSecond(row.card.endUnix).atZone(content.zone).toLocalTime()
-                    onEditor(
-                        EditorState(
-                            id = row.card.manualId,
-                            type = row.card.title,
-                            startHour = start.hour.toString(),
-                            startMinute = start.minute.toString(),
-                            endHour = end.hour.toString(),
-                            endMinute = end.minute.toString(),
-                        ),
+            onAdd = { editor = EditorState() },
+            onOpen = onOpenActivity,
+            onEdit = { row ->
+                val start = Instant.ofEpochSecond(row.card.startUnix).atZone(content.zone).toLocalTime()
+                val end = Instant.ofEpochSecond(row.card.endUnix).atZone(content.zone).toLocalTime()
+                editor = EditorState(
+                    id = row.card.manualId,
+                    type = row.card.title,
+                    startHour = start.hour.toString(),
+                    startMinute = start.minute.toString(),
+                    endHour = end.hour.toString(),
+                    endMinute = end.minute.toString(),
+                )
+            },
+            onDelete = onDeleteActivity,
+            editor = {
+                val current = editor
+                if (current != null) {
+                    ActivityEditor(
+                        state = current,
+                        onChange = { editor = it },
+                        onSave = { id, type, start, end ->
+                            onSaveActivity(id, type, start, end)
+                            editor = null
+                        },
+                        onCancel = { editor = null },
                     )
-                },
-                onDelete = { id -> onDeleteActivity(id) },
-            )
-        }
+                }
+            },
+        )
+        DashboardBlock(content)
     }
 }
 
 @Composable
-private fun ActivityRow(
-    row: HomeActivity,
-    onOpen: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: (Long) -> Unit,
-) {
+fun MetricCard(title: String, value: String, tag: String) {
     Row(
         Modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) { semanticsTag = "activity_${row.card.startUnix}" }
+            .semantics(mergeDescendants = true) { semanticsTag = tag }
             .background(PulsePalette.surface, RoundedCornerShape(16.dp))
-            .clickable(onClick = onOpen)
             .padding(PulseSpace.md),
-        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(row.card.title, color = PulsePalette.text, fontSize = PulseType.body, fontWeight = FontWeight.Medium)
-            Text(row.timeLabel, color = PulsePalette.muted, fontSize = PulseType.label)
-        }
-        val id = row.card.manualId
-        if (row.card.kind == ActivityKind.MANUAL && id != null) {
-            TextButton(onClick = onEdit, modifier = Modifier.testTag("activity_edit_$id")) {
-                Text("Edit", color = PulsePalette.text)
-            }
-            TextButton(onClick = { onDelete(id) }, modifier = Modifier.testTag("activity_delete_$id")) {
-                Text("Delete", color = PulsePalette.text)
-            }
-        }
+        Text(title, color = PulsePalette.muted, fontSize = PulseType.body)
+        Text(value, color = PulsePalette.text, fontSize = PulseType.body, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -276,7 +178,7 @@ private fun ActivityEditor(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(PulsePalette.surface, RoundedCornerShape(16.dp))
+            .background(PulsePalette.track, RoundedCornerShape(16.dp))
             .padding(PulseSpace.md)
             .testTag("activity_editor"),
         verticalArrangement = Arrangement.spacedBy(PulseSpace.sm),
@@ -404,63 +306,6 @@ private fun MonthCalendar(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun PulseDial(model: DialModel, modifier: Modifier = Modifier, tag: String) {
-    Column(
-        modifier.semantics(mergeDescendants = true) { semanticsTag = tag },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val tone = model.tone.color()
-        Box(contentAlignment = Alignment.Center) {
-            Canvas(Modifier.size(108.dp).padding(PulseSpace.xs)) {
-                val stroke = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
-                drawArc(
-                    color = PulsePalette.track,
-                    startAngle = 135f,
-                    sweepAngle = 270f,
-                    useCenter = false,
-                    style = stroke,
-                )
-                if (model.progress > 0f) {
-                    drawArc(
-                        color = tone,
-                        startAngle = 135f,
-                        sweepAngle = 270f * model.progress.coerceIn(0f, 1f),
-                        useCenter = false,
-                        style = stroke,
-                    )
-                }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    model.value,
-                    color = PulsePalette.text,
-                    fontSize = PulseType.body,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                )
-                Text(model.title, color = PulsePalette.muted, fontSize = PulseType.label, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
-
-@Composable
-fun MetricCard(title: String, value: String, tag: String) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) { semanticsTag = tag }
-            .background(PulsePalette.surface, RoundedCornerShape(16.dp))
-            .padding(PulseSpace.md),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, color = PulsePalette.muted, fontSize = PulseType.body)
-        Text(value, color = PulsePalette.text, fontSize = PulseType.body, fontWeight = FontWeight.SemiBold)
     }
 }
 
