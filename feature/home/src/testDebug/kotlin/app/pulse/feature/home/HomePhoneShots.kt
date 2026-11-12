@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.cash.paparazzi.DeviceConfig
+import app.pulse.link.StrapPresence
 import app.cash.paparazzi.Paparazzi
 import com.android.ide.common.rendering.api.SessionParams.RenderingMode
 import org.junit.Rule
@@ -74,14 +76,22 @@ class HomeLargeShots {
 private fun phoneTop(content: HomeContent) {
     Box(Modifier.fillMaxSize().background(PulsePalette.background)) {
         Column(Modifier.padding(PulseSpace.md)) {
-            DateHeader(
-                label = content.headerLabel,
-                previousEnabled = true,
-                nextEnabled = !content.isToday,
-                onPrevious = {},
-                onNext = {},
-                onOpenCalendar = {},
-            )
+            Box(Modifier.fillMaxWidth()) {
+                DateHeader(
+                    label = content.headerLabel,
+                    previousEnabled = true,
+                    nextEnabled = !content.isToday,
+                    onPrevious = {},
+                    onNext = {},
+                    onOpenCalendar = {},
+                )
+                StrapStatusButton(
+                    presence = StrapPresence(connected = true),
+                    onClick = {},
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    motion = false,
+                )
+            }
             SummaryRings(content, onOpenActivity = {})
             HealthMonitorButton(onClick = {})
         }

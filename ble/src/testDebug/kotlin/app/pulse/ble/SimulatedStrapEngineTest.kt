@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.pulse.wire.codec.BandMotion
 import app.pulse.wire.codec.BatteryCommand
+import app.pulse.wire.codec.ChargeEvent
 import app.pulse.wire.codec.ClockCommand
 import app.pulse.wire.codec.CommandResult
 import app.pulse.wire.codec.DataRangeCommand
@@ -177,6 +178,23 @@ class SimulatedStrapEngineTest {
         assertEquals(1, ends)
         assertTrue(records > SyntheticHistory.CHUNK_RECORDS)
         assertTrue(DisconnectLatch.tripped)
+    }
+
+    @Test
+    fun chargingScenarioEmitsEventSevenOnce() {
+        val engine = engine(StrapScenario.CHARGING)
+        assertEquals(64, engine.batteryPercent)
+        val frame = engine.takeChargeFrame()
+        assertTrue(frame != null)
+        val decoded = FrameCodec.decode(frame!!) as DecodeResult.Ok
+        assertEquals(true, ChargeEvent.charging(decoded.frame))
+        assertEquals(ChargeEvent.ON, decoded.frame.command)
+        assertNull(engine.takeChargeFrame())
+        assertNull(engine(StrapScenario.NORMAL).takeChargeFrame())
+        assertNull(engine(StrapScenario.DISCONNECT).takeChargeFrame())
+        val battery = response(engine, command(BatteryCommand.NUMBER, 2, ByteArray(0)))
+        assertEquals(64L, BatteryCommand.percent(battery.body))
+        assertNull(ChargeEvent.charging((FrameCodec.decode(engine.onCommand(command(BatteryCommand.NUMBER, 6, ByteArray(0))).single()) as DecodeResult.Ok).frame))
     }
 
     @Test

@@ -6,6 +6,9 @@ import app.pulse.ble.DeviceBond
 import app.pulse.ble.ScanFailure
 import app.pulse.ble.StrapSighting
 import java.util.ArrayDeque
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Connect and bond state machine.
@@ -67,6 +70,11 @@ class StrapLink(
 
     @Volatile
     private var current = LinkSnapshot()
+
+    private val statesOut = MutableStateFlow(current)
+
+    /** Latest link snapshot. Updated wherever [publish] runs. */
+    val states: StateFlow<LinkSnapshot> = statesOut.asStateFlow()
 
     fun snapshot(): LinkSnapshot = current
 
@@ -314,6 +322,7 @@ class StrapLink(
             commandBatteryPercent = commandBatteryPercent,
             serviceBatteryPercent = serviceBatteryPercent,
         )
+        statesOut.value = current
         log(
             "link ${current.phase} bond=${current.bondAttempt} " +
                 "connect=${current.connectAttempt} address=${current.address}",

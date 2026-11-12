@@ -11,16 +11,20 @@ object AutoSync {
     /**
      * Gap between history pulls while the strap stays connected.
      *
-     * Twenty minutes sits inside the 15–30 minute range. WorkManager's
-     * periodic work cannot be shorter than 15 minutes, and Android may run
-     * that fallback later than this.
+     * Five minutes is shorter than WorkManager's periodic minimum, so the
+     * fallback is a self-rescheduling one-time request delayed by this long.
+     * Doze and a low battery can still run that request later.
      */
-    const val INTERVAL_MS: Long = 20L * 60L * 1000L
+    const val INTERVAL_MS: Long = 5L * 60L * 1000L
+
+    /** Unique name of the one-time chain. Not the old periodic work. */
+    const val WORK_NAME: String = "pulse-history-chain"
+
+    /** Periodic work from builds before the five-minute chain. Cancelled on enqueue. */
+    const val LEGACY_PERIODIC_NAME: String = "pulse-history-sync"
 
     /** Connect and a foreground open in the same minute share one pull. */
     const val FOREGROUND_COOLDOWN_MS: Long = 60_000L
-
-    const val WORK_NAME: String = "pulse-history-sync"
 
     /**
      * How long the fallback worker may block while one history attempt runs.

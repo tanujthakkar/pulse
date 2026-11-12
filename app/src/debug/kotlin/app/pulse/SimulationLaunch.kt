@@ -84,6 +84,7 @@ fun SimulatedStrapControls(onRestart: () -> Unit) {
             "empty" to "Empty",
             "disconnect" to "Disconnect",
             "low_battery" to "Low battery",
+            "charging" to "Charging",
         ).forEach { (name, label) ->
             TextButton(
                 onClick = {

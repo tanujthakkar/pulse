@@ -10,10 +10,12 @@ import app.pulse.metrics.ActivityCard
 fun HomeRoute(
     onOpenActivity: (ActivityCard) -> Unit,
     onOpenHealth: () -> Unit,
+    onOpenStrap: () -> Unit = {},
     onOpenMetric: (String, java.time.LocalDate) -> Unit = { _, _ -> },
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val content by viewModel.ui.collectAsState()
+    val strap by viewModel.strap.collectAsState()
     HomeScreen(
         content = content,
         onPickDate = viewModel::pick,
@@ -21,6 +23,8 @@ fun HomeRoute(
         onOpenHealth = onOpenHealth,
         onSaveActivity = viewModel::saveActivity,
         onDeleteActivity = viewModel::deleteActivity,
+        strap = strap,
+        onOpenStrap = onOpenStrap,
         onOpenMetric = { tag ->
             val date = content?.date ?: return@HomeScreen
             onOpenMetric(tag, date)

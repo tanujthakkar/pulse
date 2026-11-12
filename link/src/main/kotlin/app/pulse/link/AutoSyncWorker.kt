@@ -22,11 +22,10 @@ import java.util.concurrent.TimeUnit
  * It calls [AutoSyncCoordinator], which uses the existing link and the
  * existing sync attempt. It does not send command 23 itself.
  *
- * Success is a finished history attempt, a recent one still inside the
- * cooldown, or nothing to do because no strap is connecting. Starting an
- * attempt is not success, and neither is an idle result while the link is
- * still coming up: the worker waits, then reports the outcome. A strap that
- * is not ready, a reconnect, or an attempt that did not complete is [Result.retry].
+ * Success is only a history attempt that reached metadata complete. A sync
+ * that is already running is skipped. Every run, completed or failed, asks
+ * the coordinator to schedule the next one-time request. The worker does not
+ * use [Result.retry], which would stack a backoff on that chain.
  */
 class AutoSyncWorker(
     context: Context,
@@ -37,24 +36,25 @@ class AutoSyncWorker(
             applicationContext,
             AutoSyncEntryPoint::class.java,
         ).coordinator()
-        val outcome = coordinator.runWorker()
+        val outcome = try {
+            coordinator.runWorker()
+        } catch (error: Exception) {
+            Log.w(BleClients.LOG_TAG, "auto-sync worker failed", error)
+            AutoSyncOutcome.FAILED
+        } finally {
+            try {
+                coordinator.scheduleAfterRun()
+            } catch (error: Exception) {
+                Log.w(BleClients.LOG_TAG, "auto-sync reschedule failed", error)
+            }
+        }
         Log.i(BleClients.LOG_TAG, "auto-sync worker $outcome")
         return autoSyncWorkerResult(outcome)
     }
 }
 
-internal fun autoSyncWorkerResult(outcome: AutoSyncOutcome): Result = when (outcome) {
-    AutoSyncOutcome.FINISHED,
-    AutoSyncOutcome.COOLING_DOWN,
-    AutoSyncOutcome.IDLE,
-    -> Result.success()
-    AutoSyncOutcome.STARTED,
-    AutoSyncOutcome.IN_PROGRESS,
-    AutoSyncOutcome.RECONNECTING,
-    AutoSyncOutcome.NOT_READY,
-    AutoSyncOutcome.FAILED,
-    -> Result.retry()
-}
+internal fun autoSyncWorkerResult(outcome: AutoSyncOutcome): Result =
+    if (outcome == AutoSyncOutcome.FINISHED) Result.success() else Result.failure()
 
 /**
  * Blocks until the history attempt that is already running reaches an outcome.

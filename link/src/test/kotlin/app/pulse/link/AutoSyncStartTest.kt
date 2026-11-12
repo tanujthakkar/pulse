@@ -36,14 +36,15 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class AutoSyncStartTest {
     @Test
-    fun workerRetriesWhenTheStrapIsNotReadyAndSucceedsOnceASyncStarts() {
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.NOT_READY))
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.RECONNECTING))
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.IN_PROGRESS))
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.FAILED))
+    fun workerSucceedsOnlyAfterTheSyncCompletes() {
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.NOT_READY))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.RECONNECTING))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.IN_PROGRESS))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.FAILED))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.IDLE))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.COOLING_DOWN))
         assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.FINISHED))
-        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.IDLE))
     }
 
     @Test
@@ -58,7 +59,7 @@ class AutoSyncStartTest {
         val started = System.currentTimeMillis()
         val outcome = coordinator.runWorker()
         assertEquals(AutoSyncOutcome.NOT_READY, outcome)
-        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(outcome))
+        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(outcome))
         assertTrue(System.currentTimeMillis() - started >= 200)
     }
 
@@ -161,6 +162,28 @@ class AutoSyncStartTest {
         val frame = FrameCodec.decode(written.single()) as DecodeResult.Ok
         assertEquals(ClockCommand.GET, frame.frame.command)
         assertEquals(AutoSyncOutcome.IN_PROGRESS, coordinator.on(AutoSyncTrigger.WORKER))
+    }
+
+    @Test
+    fun aScheduledRunSkipsWhenASyncIsAlreadyRunning() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val commands = StrapCommandPort()
+        commands.bind { }
+        commands.markReady(ADDRESS)
+        val link = StrapLink(presentPorts(), idleClock())
+        val sync = HistorySyncHost(commands, QuietStore(), link)
+        val coordinator = AutoSyncCoordinator(link, sync, NoDevice(), context)
+        coordinator.workerWaitMs = 5_000
+        coordinator.armLinkWatch()
+        link.start()
+        link.onSighting(StrapSighting(ADDRESS, rssi = -40, advertisedName = null))
+        link.onSessionReady()
+        link.onDeviceReport(DeviceReport(settled = true, succeeded = true, heartRateLive = true))
+        assertTrue(sync.running.value)
+        val started = System.currentTimeMillis()
+        assertEquals(AutoSyncOutcome.IN_PROGRESS, coordinator.runWorker())
+        assertTrue(System.currentTimeMillis() - started < 1_000)
+        assertTrue(sync.running.value)
     }
 
     private fun presentPorts(): LinkPorts = object : LinkPorts {

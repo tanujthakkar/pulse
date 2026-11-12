@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag as semanticsTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.pulse.link.StrapPresence
 import app.pulse.metrics.ActivityCard
 import java.time.Instant
 import java.time.LocalTime
@@ -45,6 +46,8 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     initiallyShowCalendar: Boolean = false,
     initiallyEditing: Boolean = false,
+    strap: StrapPresence = StrapPresence(),
+    onOpenStrap: () -> Unit = {},
 ) {
     var calendarOpen by remember { mutableStateOf(initiallyShowCalendar) }
     var visibleMonth by remember {
@@ -69,19 +72,26 @@ fun HomeScreen(
         contentPadding = PaddingValues(top = PulseSpace.md, bottom = 88.dp),
     ) {
         item {
-        DateHeader(
-            label = content?.headerLabel ?: "--",
-            previousEnabled = content != null,
-            nextEnabled = content != null && !content.isToday,
-            onPrevious = { content?.let { onPickDate(it.date.minusDays(1)) } },
-            onNext = { content?.let { onPickDate(it.date.plusDays(1)) } },
-            onOpenCalendar = {
-                if (content != null) {
-                    visibleMonth = YearMonth.from(content.date)
-                    calendarOpen = !calendarOpen
-                }
-            },
-        )
+            Box(Modifier.fillMaxWidth()) {
+                DateHeader(
+                    label = content?.headerLabel ?: "--",
+                    previousEnabled = content != null,
+                    nextEnabled = content != null && !content.isToday,
+                    onPrevious = { content?.let { onPickDate(it.date.minusDays(1)) } },
+                    onNext = { content?.let { onPickDate(it.date.plusDays(1)) } },
+                    onOpenCalendar = {
+                        if (content != null) {
+                            visibleMonth = YearMonth.from(content.date)
+                            calendarOpen = !calendarOpen
+                        }
+                    },
+                )
+                StrapStatusButton(
+                    presence = strap,
+                    onClick = onOpenStrap,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
         }
         if (content == null) {
             item {

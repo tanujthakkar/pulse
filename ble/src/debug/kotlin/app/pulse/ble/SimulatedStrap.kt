@@ -65,6 +65,7 @@ enum class StrapScenario(val wireName: String) {
     EMPTY("empty"),
     DISCONNECT("disconnect"),
     LOW_BATTERY("low_battery"),
+    CHARGING("charging"),
     ;
 
     companion object {

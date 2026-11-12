@@ -6,17 +6,15 @@ import android.os.Looper
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import app.pulse.data.DeviceDirectory
 import app.pulse.sync.AutoSync
 import app.pulse.sync.AutoSyncAction
 import app.pulse.sync.AutoSyncInput
 import app.pulse.sync.AutoSyncOutcome
 import app.pulse.sync.AutoSyncTrigger
+import app.pulse.sync.SyncChainReason
 import app.pulse.sync.autoSyncAction
+import app.pulse.sync.syncChainRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -33,9 +31,9 @@ import javax.inject.Singleton
  * not write that switch or send its own strap command.
  *
  * The foreground service keeps the radio up and reconnects a drop on its
- * own. WorkManager is the fallback after the process is gone. It does not
- * scan unless a device row is already stored, and it waits while the battery
- * is low. Android may defer that work.
+ * own. WorkManager is a separate five-minute one-time chain, not a second
+ * foreground service. It does not scan unless a device row is already stored,
+ * and it waits while the battery is low. Doze may run that chain later.
  */
 @Singleton
 class AutoSyncCoordinator @Inject constructor(
@@ -76,7 +74,7 @@ class AutoSyncCoordinator @Inject constructor(
             },
         )
         handler.postDelayed(periodic, AutoSync.INTERVAL_MS)
-        scheduleFallback()
+        ensureChain(SyncChainReason.APP_START)
     }
 
     /**
@@ -108,16 +106,15 @@ class AutoSyncCoordinator @Inject constructor(
      *
      * A link that is still scanning, bonding, connecting, or waiting on hello
      * is not success. The worker waits for that link, then for the history
-     * attempt. The result is not [AutoSyncOutcome.STARTED]. Callers that only
-     * need to kick a sync, such as a connect, still use [on].
+     * attempt it started. A sync that is already running is skipped. The
+     * result is not [AutoSyncOutcome.STARTED]. Callers that only need to kick
+     * a sync, such as a connect, still use [on].
      */
     fun runWorker(): AutoSyncOutcome {
         val deadline = clock() + workerWaitMs
         while (true) {
             when (val outcome = on(AutoSyncTrigger.WORKER)) {
-                AutoSyncOutcome.STARTED,
-                AutoSyncOutcome.IN_PROGRESS,
-                -> {
+                AutoSyncOutcome.STARTED -> {
                     val left = (deadline - clock()).coerceAtLeast(1L)
                     return settleWorkerSync(
                         running = { sync.running.value },
@@ -126,6 +123,7 @@ class AutoSyncCoordinator @Inject constructor(
                         timeoutMs = left,
                     )
                 }
+                AutoSyncOutcome.IN_PROGRESS -> return outcome
                 AutoSyncOutcome.COOLING_DOWN,
                 AutoSyncOutcome.FINISHED,
                 -> return outcome
@@ -254,14 +252,13 @@ class AutoSyncCoordinator @Inject constructor(
         }
     }
 
-    private fun scheduleFallback() {
-        val request = PeriodicWorkRequestBuilder<AutoSyncWorker>(AutoSync.INTERVAL_MS, TimeUnit.MILLISECONDS)
-            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
-            .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            AutoSync.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request,
-        )
+    /** App start and boot. KEEP so a live chain is left alone. */
+    fun ensureChain(reason: SyncChainReason = SyncChainReason.APP_START) {
+        SyncWork.enqueue(context, syncChainRequest(reason))
+    }
+
+    /** After a worker finishes, completed or not. One follow-up, five minutes out. */
+    fun scheduleAfterRun() {
+        SyncWork.enqueue(context, syncChainRequest(SyncChainReason.AFTER_RUN))
     }
 }

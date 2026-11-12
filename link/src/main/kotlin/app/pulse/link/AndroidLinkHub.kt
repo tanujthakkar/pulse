@@ -16,6 +16,7 @@ import app.pulse.ble.StrapSighting
 import app.pulse.data.DeviceDirectory
 import app.pulse.wire.codec.FrameIntake
 import app.pulse.wire.codec.FrameRing
+import app.pulse.wire.codec.PacketType
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +44,7 @@ internal class AndroidLinkHub(
     private val devices: DeviceDirectory,
     private val commands: StrapCommandPort,
     private val frames: FrameRing,
+    private val charge: ChargeSignals,
 ) : LinkPorts {
     private var link: StrapLink? = null
     private var session: GattSession? = null
@@ -160,6 +162,7 @@ internal class AndroidLinkHub(
                     // written on the database thread.
                     handshake?.onNotification(characteristic, value)
                     commands.deliver(characteristic.toString(), value)
+                    if (looksLikeEvent(value)) charge.offer(value)
                 }
 
                 override fun onWriteFinished(characteristic: UUID, status: Int) {
@@ -178,6 +181,7 @@ internal class AndroidLinkHub(
                     val active = opened.session ?: return
                     if (session !== active) return
                     commands.markDown()
+                    charge.clear()
                     handshake?.stop()
                     handshake = null
                     session = null
@@ -196,6 +200,7 @@ internal class AndroidLinkHub(
         opened.session = created
         session = created
         sessionAddress = address
+        charge.clear()
         follow(created)
         previous?.disconnect()
         created.open(address)
@@ -243,6 +248,9 @@ internal class AndroidLinkHub(
         }
     }
 
+    private fun looksLikeEvent(value: ByteArray): Boolean =
+        value.size > 10 && (value[8].toInt() and 0xFF) == PacketType.EVENT
+
     private fun dropFeed() {
         feedGeneration += 1
         heartRateJob?.cancel()
@@ -260,12 +268,12 @@ class LinkAssembly(
 )
 
 object StrapLinks {
-    fun create(context: Context, devices: DeviceDirectory): LinkAssembly {
+    fun create(context: Context, devices: DeviceDirectory, charge: ChargeSignals): LinkAssembly {
         val appContext = context.applicationContext
         val heartRate = LiveHeartRateFeed()
         val commands = StrapCommandPort()
         val frames = FrameRing()
-        val hub = AndroidLinkHub(appContext, heartRate, devices, commands, frames)
+        val hub = AndroidLinkHub(appContext, heartRate, devices, commands, frames, charge)
         val link = StrapLink(
             ports = hub,
             clock = SystemLinkClock(),

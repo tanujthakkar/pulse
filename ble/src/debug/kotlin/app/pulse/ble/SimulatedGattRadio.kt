@@ -109,6 +109,9 @@ internal class SimulatedGattRadio(context: Context) : GattRadio {
             for (frame in replies) {
                 listener?.onNotification(StrapGatt.RESPONSE_NOTIFY, frame)
             }
+            engine.takeChargeFrame()?.let { frame ->
+                listener?.onNotification(StrapGatt.EVENT_NOTIFY, frame)
+            }
             if (startHistory) scheduleHistory()
         }
         return true

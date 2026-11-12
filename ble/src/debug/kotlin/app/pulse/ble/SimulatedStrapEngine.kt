@@ -1,11 +1,13 @@
 package app.pulse.ble
 
 import app.pulse.wire.codec.BatteryCommand
+import app.pulse.wire.codec.ChargeEvent
 import app.pulse.wire.codec.ClockCommand
 import app.pulse.wire.codec.CommandResult
 import app.pulse.wire.codec.DataRangeCommand
 import app.pulse.wire.codec.DecodeResult
 import app.pulse.wire.codec.FrameCodec
+import app.pulse.wire.codec.HeaderWord
 import app.pulse.wire.codec.HelloBody
 import app.pulse.wire.codec.HelloCommand
 import app.pulse.wire.codec.HistoryAckCommand
@@ -34,6 +36,7 @@ internal class SimulatedStrapEngine(
     val batteryPercent: Int = when (scenario) {
         StrapScenario.LOW_BATTERY -> 8
         StrapScenario.EMPTY -> 91
+        StrapScenario.CHARGING -> 64
         StrapScenario.NORMAL, StrapScenario.DISCONNECT -> 76
     }
 
@@ -41,6 +44,7 @@ internal class SimulatedStrapEngine(
         private set
 
     private val interrupt = scenario == StrapScenario.DISCONNECT && !DisconnectLatch.tripped
+    private var chargeSent = false
     private var responseSequence = 1
     private var armed = false
     private var cursor = Cursor.IDLE
@@ -77,6 +81,22 @@ internal class SimulatedStrapEngine(
             }
             else -> listOf(reply(origin, command, CommandResult.UNSUPPORTED, ByteArray(0)))
         }
+    }
+
+    /**
+     * One event-7 frame for [StrapScenario.CHARGING]. Other scenarios return
+     * null. A battery percent is not turned into a charging frame.
+     */
+    fun takeChargeFrame(): ByteArray? {
+        if (scenario != StrapScenario.CHARGING || chargeSent) return null
+        chargeSent = true
+        return FrameCodec.encode(
+            headerWord = HeaderWord.COMMON_RESPONSE,
+            packetType = PacketType.EVENT,
+            sequence = 0,
+            command = ChargeEvent.ON,
+            body = ByteArray(0),
+        )
     }
 
     fun consumeArm(): Boolean {

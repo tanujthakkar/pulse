@@ -2,6 +2,7 @@ package app.pulse
 
 import android.content.Context
 import app.pulse.data.DeviceDirectory
+import app.pulse.link.ChargeSignals
 import app.pulse.link.LinkAssembly
 import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapCommandPort
@@ -22,7 +23,8 @@ object LinkBindings {
     fun linkAssembly(
         @ApplicationContext context: Context,
         devices: DeviceDirectory,
-    ): LinkAssembly = StrapLinks.create(context, devices)
+        charge: ChargeSignals,
+    ): LinkAssembly = StrapLinks.create(context, devices, charge)
 
     @Provides
     fun strapLink(assembly: LinkAssembly): StrapLink = assembly.strapLink

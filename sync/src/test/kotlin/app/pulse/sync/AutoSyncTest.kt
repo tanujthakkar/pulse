@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test
 class AutoSyncTest {
     @Test
     fun pullsOnConnectThenOnTheIntervalAndOnForeground() {
-        assertEquals(20L * 60L * 1000L, AutoSync.INTERVAL_MS)
+        assertEquals(5L * 60L * 1000L, AutoSync.INTERVAL_MS)
         assertEquals(AutoSyncAction.SYNC, autoSyncAction(input(AutoSyncTrigger.CONNECTED, linked = true)))
         assertEquals(
             AutoSyncAction.NONE,

@@ -55,6 +55,7 @@ fun PulseNavHost(onSimulationChanged: () -> Unit = {}) {
                 HomeRoute(
                     onOpenActivity = { card -> navController.navigate(activityRoute(card)) },
                     onOpenHealth = { navController.navigate(HEALTH_ROUTE) },
+                    onOpenStrap = { navController.navigate(PulseRoute.Connect.route) },
                     onOpenMetric = { tag, date -> navController.navigate(metricRoute(tag, date)) },
                 )
             }

@@ -9,6 +9,8 @@ import app.pulse.data.StoredBodyProfile
 import app.pulse.link.LinkSnapshot
 import app.pulse.link.LiveHeartRateFeed
 import app.pulse.link.StrapLink
+import app.pulse.link.StrapPresence
+import app.pulse.link.StrapPresenceSource
 import app.pulse.metrics.DayBook
 import app.pulse.metrics.LoggedActivity
 import app.pulse.metrics.activityWindow
@@ -24,6 +26,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +60,7 @@ class HomeViewModel internal constructor(
     private val debounceMs: Long = RELOAD_QUIET_MS,
     private val collectHeart: Boolean = true,
     private val profiles: StoredBodyProfile? = null,
+    private val presence: StrapPresenceSource? = null,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -65,13 +69,25 @@ class HomeViewModel internal constructor(
         link: StrapLink,
         heart: LiveHeartRateFeed,
         profiles: StoredBodyProfile,
-    ) : this(days, activities, link, heart, { LocalDate.now() }, newHomeExecutor(), profiles = profiles)
+        presence: StrapPresenceSource,
+    ) : this(
+        days,
+        activities,
+        link,
+        heart,
+        { LocalDate.now() },
+        newHomeExecutor(),
+        profiles = profiles,
+        presence = presence,
+    )
 
     private var stopProfile: () -> Unit = {}
     private val reloadTicket = AtomicInteger()
     private val reloadQueued = AtomicBoolean(false)
     private val _ui = MutableStateFlow<HomeContent?>(null)
     val ui: StateFlow<HomeContent?> = _ui.asStateFlow()
+    private val _strap = MutableStateFlow(StrapPresence())
+    val strap: StateFlow<StrapPresence> = _strap.asStateFlow()
 
     private var snapshot = DaySnapshot(DayBook(ZoneId.systemDefault().id, emptyList(), null), null, null)
     private var logged: List<LoggedActivity> = emptyList()
@@ -108,6 +124,12 @@ class HomeViewModel internal constructor(
             }
         }
         refresh()
+        val source = presence
+        if (source != null) {
+            viewModelScope.launch(Dispatchers.Default) {
+                source.presence.collect { _strap.value = it }
+            }
+        }
         stopDays = days.watch { onDaysChanged() }
         stopProfile = profiles?.watch { refresh() } ?: {}
     }
