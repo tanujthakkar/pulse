@@ -134,7 +134,7 @@ internal class SimulatedStrapEngine(
                     }
                 }
                 Cursor.SEAL -> {
-                    frames += endMetadata(chunk)
+                    frames += endMetadata(chunk, history.epochDay)
                     chunk += 1
                     cursor = if (index >= history.total) Cursor.FINISH else Cursor.READY
                     pause = true
@@ -231,8 +231,8 @@ internal sealed class StreamPull {
 }
 
 /**
- * One disconnect per process. The link scans again after a drop, and the
- * next session should finish instead of dropping in a loop.
+ * One mid-sync drop per process. After it trips, a disconnect scenario
+ * refuses the next connect and stays down so the home icon can stay red.
  */
 internal object DisconnectLatch {
     var tripped: Boolean = false

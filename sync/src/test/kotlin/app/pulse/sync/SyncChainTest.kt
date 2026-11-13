@@ -27,7 +27,17 @@ class SyncChainTest {
         ledger.enqueue(syncChainRequest(SyncChainReason.AFTER_RUN))
         val pending = ledger.pending().single()
         assertEquals(5L * 60L * 1000L, pending.delayMs)
-        assertEquals(SyncChainPolicy.REPLACE, pending.policy)
+        assertEquals(SyncChainPolicy.APPEND, pending.policy)
         assertEquals(AutoSync.WORK_NAME, pending.name)
+    }
+
+    @Test
+    fun aFinishedSyncRestartsTheDelayFromThatMoment() {
+        val ledger = SyncChainLedger()
+        ledger.enqueue(syncChainRequest(SyncChainReason.APP_START))
+        ledger.enqueue(syncChainRequest(SyncChainReason.AFTER_FINISH))
+        val pending = ledger.pending().single()
+        assertEquals(5L * 60L * 1000L, pending.delayMs)
+        assertEquals(SyncChainPolicy.RESET, pending.policy)
     }
 }

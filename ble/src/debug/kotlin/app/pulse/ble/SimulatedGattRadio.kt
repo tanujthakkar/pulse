@@ -55,8 +55,14 @@ internal class SimulatedGattRadio(context: Context) : GattRadio {
     override fun connect(address: String): Boolean {
         if (closed) return false
         Log.i(BleClients.LOG_TAG, "simulated strap connect scenario=${engine.scenario.wireName}")
+        val stayDown = engine.scenario == StrapScenario.DISCONNECT && DisconnectLatch.tripped
         handler.post {
             if (closed) return@post
+            if (stayDown) {
+                connected = false
+                listener?.onConnectionState(GattStatus.LINK_DROPPED, false)
+                return@post
+            }
             connected = true
             listener?.onConnectionState(GattStatus.SUCCESS, true)
         }

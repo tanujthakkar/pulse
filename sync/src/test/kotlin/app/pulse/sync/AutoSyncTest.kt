@@ -1,6 +1,7 @@
 package app.pulse.sync
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class AutoSyncTest {
@@ -28,20 +29,32 @@ class AutoSyncTest {
         )
         assertEquals(
             AutoSyncAction.NONE,
-            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, elapsed = AutoSync.INTERVAL_MS - 1)),
+            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, finishedAgo = AutoSync.CHAIN_COOLDOWN_MS - 1)),
         )
         assertEquals(
             AutoSyncAction.SYNC,
-            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, elapsed = AutoSync.INTERVAL_MS)),
+            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, finishedAgo = AutoSync.CHAIN_COOLDOWN_MS)),
         )
         assertEquals(
             AutoSyncAction.NONE,
-            autoSyncAction(input(AutoSyncTrigger.WORKER, linked = true, elapsed = 1_000L)),
+            autoSyncAction(input(AutoSyncTrigger.WORKER, linked = true, finishedAgo = 1_000L)),
         )
         assertEquals(
             AutoSyncAction.SYNC,
-            autoSyncAction(input(AutoSyncTrigger.WORKER, linked = true, elapsed = AutoSync.INTERVAL_MS)),
+            autoSyncAction(input(AutoSyncTrigger.WORKER, linked = true, finishedAgo = AutoSync.CHAIN_COOLDOWN_MS)),
         )
+        assertEquals(
+            AutoSyncAction.SYNC,
+            autoSyncAction(
+                input(
+                    AutoSyncTrigger.WORKER,
+                    linked = true,
+                    elapsed = AutoSync.INTERVAL_MS,
+                    finishedAgo = 150_000L,
+                ),
+            ),
+        )
+        assertTrue(AutoSync.CHAIN_COOLDOWN_MS < AutoSync.INTERVAL_MS)
     }
 
     @Test
@@ -77,6 +90,7 @@ class AutoSyncTest {
         linked: Boolean,
         running: Boolean = false,
         elapsed: Long? = null,
+        finishedAgo: Long? = null,
         idle: Boolean = false,
         failed: Boolean = false,
         known: Boolean = true,
@@ -85,6 +99,7 @@ class AutoSyncTest {
         linked = linked,
         running = running,
         millisSinceLastStart = elapsed,
+        millisSinceLastFinish = finishedAgo,
         phaseIdle = idle,
         phaseFailed = failed,
         knownDevice = known,

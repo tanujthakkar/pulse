@@ -13,17 +13,20 @@ import kotlin.math.sin
 /**
  * Layout-18 history generated from [SEED].
  *
- * Fifteen local days of one-minute daytime samples, and fourteen nights of
- * one sample per second. Recovery needs three earlier qualifying nights, so
- * three nights left today blank. Sleep duration on the home screen is the
- * number of sleep samples, so a night is stored at 1 Hz. Nothing here is
- * copied from a person's strap.
+ * Fifteen local days of one-minute daytime samples ending on [today], and
+ * fourteen nights of one sample per second. The newest night starts the
+ * evening before [today] and wakes on [today], so the home window for today
+ * contains sleep. Sleep duration on the home screen is the number of sleep
+ * samples, so a night is stored at 1 Hz. Chunk tokens include [epochDay], so
+ * a later calendar day is stored instead of matching an older series.
+ * Nothing here is copied from a person's strap.
  */
 internal class SyntheticHistory(
     private val today: LocalDate,
     private val zone: ZoneId,
     private val seed: Int = SEED,
 ) {
+    val epochDay: Int = today.toEpochDay().toInt()
     private val daySteps: Array<IntArray> = Array(DAY_COUNT) { ordinal ->
         val values = IntArray(DAY_MINUTES)
         var sum = 0
@@ -159,10 +162,10 @@ internal class SyntheticHistory(
             )
         }
 
-        fun chunkToken(chunk: Int): ByteArray = byteArrayOf(
-            0x10,
-            0x20,
-            0x30,
+        fun chunkToken(chunk: Int, epochDay: Int): ByteArray = byteArrayOf(
+            (epochDay and 0xFF).toByte(),
+            ((epochDay ushr 8) and 0xFF).toByte(),
+            ((epochDay ushr 16) and 0xFF).toByte(),
             0x40,
             (chunk and 0xFF).toByte(),
             ((chunk ushr 8) and 0xFF).toByte(),
@@ -204,5 +207,5 @@ internal class SyntheticSample(
     val skinTempRaw: Int = 0,
 )
 
-internal fun endMetadata(chunk: Int): ByteArray =
-    SyntheticHistory.metadata(HistoryMetadata.END, SyntheticHistory.chunkToken(chunk))
+internal fun endMetadata(chunk: Int, epochDay: Int): ByteArray =
+    SyntheticHistory.metadata(HistoryMetadata.END, SyntheticHistory.chunkToken(chunk, epochDay))

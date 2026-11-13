@@ -22,39 +22,73 @@ import java.util.concurrent.TimeUnit
  * It calls [AutoSyncCoordinator], which uses the existing link and the
  * existing sync attempt. It does not send command 23 itself.
  *
- * Success is only a history attempt that reached metadata complete. A sync
- * that is already running is skipped. Every run, completed or failed, asks
- * the coordinator to schedule the next one-time request. The worker does not
- * use [Result.retry], which would stack a backoff on that chain.
+ * A finished pull, a cooldown, a skip, and an idle run return success and
+ * append the next request. That request's five-minute delay starts when this
+ * run returns, which is when the previous run finishes. [Result.failure]
+ * would mark an APPEND_OR_REPLACE follow-up FAILED before it is enqueued, so
+ * a cooldown does not use it. A link that is not ready returns [Result.retry];
+ * the linear backoff is the reschedule, and no second request is appended.
  */
 class AutoSyncWorker(
     context: Context,
     params: WorkerParameters,
 ) : Worker(context, params) {
     override fun doWork(): Result {
-        val coordinator = EntryPointAccessors.fromApplication(
+        val coordinator = coordinatorForTest ?: EntryPointAccessors.fromApplication(
             applicationContext,
             AutoSyncEntryPoint::class.java,
         ).coordinator()
-        val outcome = try {
-            coordinator.runWorker()
-        } catch (error: Exception) {
-            Log.w(BleClients.LOG_TAG, "auto-sync worker failed", error)
-            AutoSyncOutcome.FAILED
-        } finally {
-            try {
-                coordinator.scheduleAfterRun()
+        coordinator.beginWorker()
+        try {
+            val outcome = try {
+                coordinator.runWorker()
             } catch (error: Exception) {
-                Log.w(BleClients.LOG_TAG, "auto-sync reschedule failed", error)
+                Log.w(BleClients.LOG_TAG, "auto-sync worker failed", error)
+                AutoSyncOutcome.FAILED
             }
+            if (autoSyncKeepsTheChain(outcome)) {
+                try {
+                    coordinator.scheduleAfterRun()
+                } catch (error: Exception) {
+                    Log.w(BleClients.LOG_TAG, "auto-sync reschedule failed", error)
+                }
+            }
+            Log.i(BleClients.LOG_TAG, "auto-sync worker $outcome")
+            return autoSyncWorkerResult(outcome)
+        } finally {
+            coordinator.endWorker()
         }
-        Log.i(BleClients.LOG_TAG, "auto-sync worker $outcome")
-        return autoSyncWorkerResult(outcome)
+    }
+
+    internal companion object {
+        /** Set by the chain test so WorkManager can run without the Hilt graph. */
+        @Volatile
+        var coordinatorForTest: AutoSyncCoordinator? = null
     }
 }
 
+/**
+ * True when this outcome should append the next delayed request.
+ *
+ * [AutoSyncOutcome.FINISHED], [AutoSyncOutcome.COOLING_DOWN],
+ * [AutoSyncOutcome.IN_PROGRESS], and [AutoSyncOutcome.IDLE] keep the chain.
+ * The others return retry and rely on the request's backoff.
+ */
+internal fun autoSyncKeepsTheChain(outcome: AutoSyncOutcome): Boolean = when (outcome) {
+    AutoSyncOutcome.FINISHED,
+    AutoSyncOutcome.COOLING_DOWN,
+    AutoSyncOutcome.IN_PROGRESS,
+    AutoSyncOutcome.IDLE,
+    -> true
+    AutoSyncOutcome.FAILED,
+    AutoSyncOutcome.NOT_READY,
+    AutoSyncOutcome.RECONNECTING,
+    AutoSyncOutcome.STARTED,
+    -> false
+}
+
 internal fun autoSyncWorkerResult(outcome: AutoSyncOutcome): Result =
-    if (outcome == AutoSyncOutcome.FINISHED) Result.success() else Result.failure()
+    if (autoSyncKeepsTheChain(outcome)) Result.success() else Result.retry()
 
 /**
  * Blocks until the history attempt that is already running reaches an outcome.

@@ -27,6 +27,18 @@ object AutoSync {
     const val FOREGROUND_COOLDOWN_MS: Long = 60_000L
 
     /**
+     * How soon a worker or the in-process timer may start another pull after
+     * the previous attempt finished.
+     *
+     * Shorter than [INTERVAL_MS]. A chain enqueued when a pull starts would
+     * otherwise fire while a five-minute-from-start cooldown was still open,
+     * skip the pull, and — if that skip was reported as failure — drop the
+     * follow-up. The chain delay itself stays [INTERVAL_MS], measured from
+     * the finish.
+     */
+    const val CHAIN_COOLDOWN_MS: Long = 60_000L
+
+    /**
      * How long the fallback worker may block while one history attempt runs.
      *
      * A normal simulated night is longer than a minute. The worker used to
@@ -72,6 +84,7 @@ data class AutoSyncInput(
     val linked: Boolean,
     val running: Boolean,
     val millisSinceLastStart: Long?,
+    val millisSinceLastFinish: Long?,
     val phaseIdle: Boolean,
     val phaseFailed: Boolean,
     val knownDevice: Boolean,
@@ -95,12 +108,14 @@ fun autoSyncAction(input: AutoSyncInput): AutoSyncAction {
                 } else {
                     AutoSyncAction.NONE
                 }
-            AutoSyncTrigger.PERIODIC, AutoSyncTrigger.WORKER ->
-                if (elapsed == null || elapsed >= AutoSync.INTERVAL_MS) {
+            AutoSyncTrigger.PERIODIC, AutoSyncTrigger.WORKER -> {
+                val sinceFinish = input.millisSinceLastFinish
+                if (sinceFinish == null || sinceFinish >= AutoSync.CHAIN_COOLDOWN_MS) {
                     AutoSyncAction.SYNC
                 } else {
                     AutoSyncAction.NONE
                 }
+            }
         }
     }
     val canReconnect = input.knownDevice && (input.phaseIdle || input.phaseFailed)

@@ -20,8 +20,10 @@ import app.pulse.wire.codec.HistoryRecordDecoder
 import app.pulse.wire.codec.HistoryStartCommand
 import app.pulse.wire.codec.PacketType
 import app.pulse.wire.codec.toCommandResponse
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -181,6 +183,60 @@ class SimulatedStrapEngineTest {
     }
 
     @Test
+    fun historyReachesTodayAndALaterDayUsesNewTokens() {
+        val history = SyntheticHistory(today, ZoneOffset.UTC)
+        val last = decode(history.frame(history.total - 1))
+        assertEquals(today, localDate(last.reading.unixSeconds))
+        val wakeIndex = (SyntheticHistory.NIGHT_COUNT - 1) *
+            (SyntheticHistory.DAY_MINUTES + SyntheticHistory.NIGHT_SECONDS) +
+            SyntheticHistory.DAY_MINUTES +
+            SyntheticHistory.NIGHT_SECONDS - 1
+        val wake = decode(history.frame(wakeIndex))
+        assertEquals(today, localDate(wake.reading.unixSeconds))
+        val windowStart = today.minusDays(1).atTime(12, 0).toEpochSecond(ZoneOffset.UTC)
+        val windowEnd = today.plusDays(2).atStartOfDay().toEpochSecond(ZoneOffset.UTC)
+        assertTrue(wake.reading.unixSeconds >= windowStart)
+        assertTrue(wake.reading.unixSeconds < windowEnd)
+        assertTrue(last.reading.unixSeconds >= windowStart)
+        assertTrue(last.reading.unixSeconds < windowEnd)
+        val stored = SyntheticHistory.chunkToken(0, today.toEpochDay().toInt())
+        val later = SyntheticHistory.chunkToken(0, today.plusDays(3).toEpochDay().toInt())
+        assertFalse(stored.contentEquals(later))
+        assertTrue(HistoryMetadata.echoable(stored))
+    }
+
+    @Test
+    fun disconnectStaysDownOnTheNextConnect() {
+        DisconnectLatch.tripped = true
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        SimulatedStrap.setEnabled(context, true)
+        SimulatedStrap.setScenarioName(context, StrapScenario.DISCONNECT.wireName)
+        val radio = SimulatedGattRadio(context)
+        var connected: Boolean? = null
+        radio.listener = object : RadioListener {
+            override fun onConnectionState(status: Int, up: Boolean) {
+                connected = up
+            }
+
+            override fun onServices(status: Int, discovered: DiscoveredGatt) = Unit
+
+            override fun onMtu(status: Int, mtu: Int) = Unit
+
+            override fun onDescriptorWrite(status: Int) = Unit
+
+            override fun onCharacteristicWrite(status: Int) = Unit
+
+            override fun onCharacteristicRead(characteristic: UUID, status: Int, value: ByteArray) = Unit
+
+            override fun onNotification(characteristic: UUID, value: ByteArray) = Unit
+        }
+        assertTrue(radio.connect(SimulatedStrap.ADDRESS))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(false, connected)
+        assertFalse(radio.discoverServices())
+    }
+
+    @Test
     fun chargingScenarioEmitsEventSevenOnce() {
         val engine = engine(StrapScenario.CHARGING)
         assertEquals(64, engine.batteryPercent)
@@ -230,6 +286,9 @@ class SimulatedStrapEngineTest {
 
     private fun decode(frame: ByteArray): HistoryRecord.Layout18 =
         HistoryRecordDecoder.decode(frame) as HistoryRecord.Layout18
+
+    private fun localDate(unixSeconds: Long): LocalDate =
+        Instant.ofEpochSecond(unixSeconds).atZone(ZoneOffset.UTC).toLocalDate()
 
     private fun metadata(frame: ByteArray) =
         (FrameCodec.decode(frame) as? DecodeResult.Ok)?.frame?.let(HistoryMetadata::read)

@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.flowOn
  *
  * [charging] is true only after event 7 while the link is up. A battery
  * percent by itself does not turn it on. [chunks] is how many history chunks
- * this attempt has stored. There is no total on the strap, so it is a count,
- * not a fraction.
+ * this attempt has received. A chunk that was already stored still counts, so
+ * a resync shows the number while frames arrive. There is no total on the
+ * strap, so it is a count, not a fraction.
  */
 data class StrapPresence(
     val connected: Boolean = false,
@@ -64,5 +65,14 @@ class StrapPresenceSource @Inject constructor(
         snapshot: LinkSnapshot,
         activity: SyncActivity,
         charging: Boolean?,
-    ): StrapPresence = strapPresence(snapshot, activity.running, activity.chunks, charging)
+    ): StrapPresence = strapPresence(snapshot, activity.running, syncingChunkCount(activity), charging)
 }
+
+/**
+ * Chunks to draw while a sync is running.
+ *
+ * [SyncActivity.chunks] counts tokens newly stored. A resync of history that
+ * is already on disk leaves that at zero while [SyncActivity.endsReceived]
+ * and the record count climb. The icon uses the larger of the two.
+ */
+fun syncingChunkCount(activity: SyncActivity): Int = maxOf(activity.endsReceived, activity.chunks)

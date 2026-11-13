@@ -3,9 +3,11 @@ package app.pulse.link
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import app.pulse.ble.BleClients
 import app.pulse.data.DeviceDirectory
 import app.pulse.sync.AutoSync
 import app.pulse.sync.AutoSyncAction
@@ -53,9 +55,18 @@ class AutoSyncCoordinator @Inject constructor(
     private var started = false
     private var wasLinked = false
     private var lastStartMs: Long? = null
+    private var lastFinishMs: Long? = null
+    private var sawRunning = false
+    private var finishWatchInstalled = false
+    @Volatile private var workerDepth: Int = 0
+    @Volatile internal var workerRuns: Int = 0
+    @Volatile internal var lastWorkerOutcome: AutoSyncOutcome? = null
     @Volatile private var knownDevice: Boolean = false
     private val deviceReads = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pulse-device-read").apply { isDaemon = true }
+    }
+    private val chainWrites = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pulse-sync-chain").apply { isDaemon = true }
     }
 
     /** How long [runWorker] waits for a link that is still coming up, then for the sync. */
@@ -65,6 +76,7 @@ class AutoSyncCoordinator @Inject constructor(
     fun start() {
         if (started) return
         started = true
+        armFinishWatch()
         armLinkWatch()
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
@@ -75,6 +87,51 @@ class AutoSyncCoordinator @Inject constructor(
         )
         handler.postDelayed(periodic, AutoSync.INTERVAL_MS)
         ensureChain(SyncChainReason.APP_START)
+    }
+
+    /**
+     * Records when a history attempt stops, and restarts the chain delay from
+     * that moment when this process's worker is not the one running it.
+     *
+     * App start enqueues the chain at the same time the launch pull starts.
+     * Replacing that pending request at the finish makes the next five minutes
+     * begin then. [beginWorker] skips the replace while [AutoSyncWorker] is
+     * inside its run, because REPLACE would cancel that worker. The worker
+     * appends its own follow-up instead.
+     */
+    internal fun armFinishWatch() {
+        if (finishWatchInstalled) return
+        finishWatchInstalled = true
+        sync.watch {
+            val running = sync.running.value
+            if (sawRunning && !running) {
+                lastFinishMs = clock()
+                if (workerDepth == 0) {
+                    chainWrites.execute {
+                        if (workerDepth != 0) return@execute
+                        try {
+                            SyncWork.enqueue(context, syncChainRequest(SyncChainReason.AFTER_FINISH))
+                        } catch (error: Exception) {
+                            Log.w(BleClients.LOG_TAG, "auto-sync finish reschedule failed", error)
+                        }
+                    }
+                }
+            }
+            sawRunning = running
+        }
+    }
+
+    /** The chain test marks a launch pull that already finished. */
+    internal fun rememberFinish(atMs: Long) {
+        lastFinishMs = atMs
+    }
+
+    internal fun beginWorker() {
+        workerDepth += 1
+    }
+
+    internal fun endWorker() {
+        workerDepth -= 1
     }
 
     /**
@@ -111,6 +168,13 @@ class AutoSyncCoordinator @Inject constructor(
      * a sync, such as a connect, still use [on].
      */
     fun runWorker(): AutoSyncOutcome {
+        workerRuns += 1
+        val outcome = executeWorker()
+        lastWorkerOutcome = outcome
+        return outcome
+    }
+
+    private fun executeWorker(): AutoSyncOutcome {
         val deadline = clock() + workerWaitMs
         while (true) {
             when (val outcome = on(AutoSyncTrigger.WORKER)) {
@@ -157,13 +221,21 @@ class AutoSyncCoordinator @Inject constructor(
             }
             AutoSyncAction.NONE -> when {
                 sync.running.value -> AutoSyncOutcome.IN_PROGRESS
-                lastStartMs != null && readyForHistory(link.snapshot()) -> AutoSyncOutcome.COOLING_DOWN
+                readyForHistory(link.snapshot()) && coolingDown() -> AutoSyncOutcome.COOLING_DOWN
                 else -> AutoSyncOutcome.IDLE
             }
         }
     }
 
     private var linkWatchInstalled = false
+
+    private fun coolingDown(): Boolean {
+        val now = clock()
+        val sinceFinish = lastFinishMs?.let { now - it }
+        if (sinceFinish != null && sinceFinish < AutoSync.CHAIN_COOLDOWN_MS) return true
+        val sinceStart = lastStartMs?.let { now - it }
+        return sinceStart != null && sinceStart < AutoSync.FOREGROUND_COOLDOWN_MS
+    }
 
     private fun readyForHistory(snapshot: LinkSnapshot): Boolean =
         snapshot.phase == LinkPhase.LINKED && snapshot.hello == HelloProgress.SUCCEEDED
@@ -214,12 +286,15 @@ class AutoSyncCoordinator @Inject constructor(
     private fun current(trigger: AutoSyncTrigger): AutoSyncInput {
         val snapshot = link.snapshot()
         val phase = snapshot.phase
-        val elapsed = lastStartMs?.let { clock() - it }
+        val now = clock()
+        val elapsed = lastStartMs?.let { now - it }
+        val sinceFinish = lastFinishMs?.let { now - it }
         return AutoSyncInput(
             trigger = trigger,
             linked = readyForHistory(snapshot),
             running = sync.running.value,
             millisSinceLastStart = elapsed,
+            millisSinceLastFinish = sinceFinish,
             phaseIdle = phase == LinkPhase.IDLE,
             phaseFailed = phase == LinkPhase.FAILED,
             knownDevice = knownDevice(),
@@ -257,7 +332,10 @@ class AutoSyncCoordinator @Inject constructor(
         SyncWork.enqueue(context, syncChainRequest(reason))
     }
 
-    /** After a worker finishes, completed or not. One follow-up, five minutes out. */
+    /**
+     * After a worker returns success. One follow-up, five minutes from this
+     * call, which is the end of [AutoSyncWorker.doWork].
+     */
     fun scheduleAfterRun() {
         SyncWork.enqueue(context, syncChainRequest(SyncChainReason.AFTER_RUN))
     }

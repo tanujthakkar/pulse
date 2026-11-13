@@ -36,15 +36,19 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class AutoSyncStartTest {
     @Test
-    fun workerSucceedsOnlyAfterTheSyncCompletes() {
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.NOT_READY))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.RECONNECTING))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.IN_PROGRESS))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.FAILED))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.IDLE))
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(AutoSyncOutcome.COOLING_DOWN))
+    fun cooldownAndSkipReportSuccessSoTheChainStaysEnqueued() {
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.NOT_READY))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.RECONNECTING))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.STARTED))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(AutoSyncOutcome.FAILED))
+        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.IN_PROGRESS))
+        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.IDLE))
+        assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.COOLING_DOWN))
         assertEquals(ListenableWorker.Result.success(), autoSyncWorkerResult(AutoSyncOutcome.FINISHED))
+        assertTrue(autoSyncKeepsTheChain(AutoSyncOutcome.COOLING_DOWN))
+        assertTrue(autoSyncKeepsTheChain(AutoSyncOutcome.IN_PROGRESS))
+        assertFalse(autoSyncKeepsTheChain(AutoSyncOutcome.FAILED))
+        assertFalse(autoSyncKeepsTheChain(AutoSyncOutcome.NOT_READY))
     }
 
     @Test
@@ -59,7 +63,7 @@ class AutoSyncStartTest {
         val started = System.currentTimeMillis()
         val outcome = coordinator.runWorker()
         assertEquals(AutoSyncOutcome.NOT_READY, outcome)
-        assertEquals(ListenableWorker.Result.failure(), autoSyncWorkerResult(outcome))
+        assertEquals(ListenableWorker.Result.retry(), autoSyncWorkerResult(outcome))
         assertTrue(System.currentTimeMillis() - started >= 200)
     }
 
