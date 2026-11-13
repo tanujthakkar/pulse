@@ -65,6 +65,13 @@ class SimulatedStrapEngineTest {
         assertTrue(SimulatedStrap.isEnabled(context))
         assertEquals(StrapScenario.LOW_BATTERY, SimulatedStrap.scenario(context))
         assertFalse(SimulatedStrap.applyIntent(context, intent))
+        val disconnected = android.content.Intent()
+            .putExtra(SimulatedStrap.EXTRA_SCENARIO, "disconnected")
+        assertTrue(SimulatedStrap.applyIntent(context, disconnected))
+        assertEquals(StrapScenario.DISCONNECT, SimulatedStrap.scenario(context))
+        assertEquals("disconnect", SimulatedStrap.scenarioName(context))
+        assertEquals(StrapScenario.DISCONNECT, StrapScenario.fromName("disconnect"))
+        assertEquals(StrapScenario.DISCONNECT, StrapScenario.fromName("Disconnected"))
     }
 
     @Test
@@ -148,6 +155,29 @@ class SimulatedStrapEngineTest {
         val kinds = pull.frames.map { metadata(it)!!.kind }
         assertEquals(listOf(HistoryMetadata.START, HistoryMetadata.COMPLETE), kinds)
         assertEquals(StreamPull.Done, engine.pull(10))
+        engine.onCommand(command(HistoryStartCommand.NUMBER, 2, HistoryStartCommand.EXPLICIT_ZERO))
+        assertTrue(engine.consumeArm())
+        val again = engine.pull(10) as StreamPull.Frames
+        assertEquals(
+            listOf(HistoryMetadata.START, HistoryMetadata.COMPLETE),
+            again.frames.map { metadata(it)!!.kind },
+        )
+        assertEquals(StreamPull.Done, engine.pull(10))
+    }
+
+    @Test
+    fun aCaughtUpStrapCompletesTheNextHistoryRequest() {
+        val engine = engine(StrapScenario.NORMAL)
+        engine.testingMarkCaughtUp()
+        val started = System.currentTimeMillis()
+        engine.onCommand(command(HistoryStartCommand.NUMBER, 1, HistoryStartCommand.EXPLICIT_ZERO))
+        assertTrue(engine.consumeArm())
+        val pull = engine.pull(10) as StreamPull.Frames
+        val kinds = pull.frames.map { metadata(it)!!.kind }
+        assertEquals(listOf(HistoryMetadata.START, HistoryMetadata.COMPLETE), kinds)
+        assertTrue(pull.frames.none { isRecord(it) })
+        assertEquals(StreamPull.Done, engine.pull(10))
+        assertTrue(System.currentTimeMillis() - started < 1_000)
     }
 
     @Test

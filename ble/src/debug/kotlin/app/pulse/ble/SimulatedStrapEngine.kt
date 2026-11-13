@@ -69,7 +69,7 @@ internal class SimulatedStrapEngine(
                 reply(origin, command, CommandResult.SUCCESS, rangeBody()),
             )
             HistoryStartCommand.NUMBER -> {
-                if (cursor == Cursor.IDLE) {
+                if (cursor == Cursor.IDLE || cursor == Cursor.DONE) {
                     cursor = Cursor.READY
                     armed = true
                 }
@@ -103,6 +103,13 @@ internal class SimulatedStrapEngine(
         val start = armed
         armed = false
         return start
+    }
+
+    /** Test hook: the series has already been sent, as after a completed sync. */
+    internal fun testingMarkCaughtUp() {
+        index = history.total
+        cursor = Cursor.DONE
+        inChunk = 0
     }
 
     fun pull(maxFrames: Int): StreamPull {

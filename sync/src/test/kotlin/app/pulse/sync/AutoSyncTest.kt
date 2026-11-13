@@ -32,8 +32,8 @@ class AutoSyncTest {
             autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, finishedAgo = AutoSync.CHAIN_COOLDOWN_MS - 1)),
         )
         assertEquals(
-            AutoSyncAction.SYNC,
-            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, finishedAgo = AutoSync.CHAIN_COOLDOWN_MS)),
+            AutoSyncAction.NONE,
+            autoSyncAction(input(AutoSyncTrigger.PERIODIC, linked = true, finishedAgo = AutoSync.INTERVAL_MS)),
         )
         assertEquals(
             AutoSyncAction.NONE,

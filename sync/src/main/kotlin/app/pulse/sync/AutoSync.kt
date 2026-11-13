@@ -30,11 +30,9 @@ object AutoSync {
      * How soon a worker or the in-process timer may start another pull after
      * the previous attempt finished.
      *
-     * Shorter than [INTERVAL_MS]. A chain enqueued when a pull starts would
-     * otherwise fire while a five-minute-from-start cooldown was still open,
-     * skip the pull, and — if that skip was reported as failure — drop the
-     * follow-up. The chain delay itself stays [INTERVAL_MS], measured from
-     * the finish.
+     * Shorter than [INTERVAL_MS]. The chain delay itself stays [INTERVAL_MS],
+     * measured from the finish. The in-process timer no longer starts a pull
+     * on this window.
      */
     const val CHAIN_COOLDOWN_MS: Long = 60_000L
 
@@ -108,7 +106,8 @@ fun autoSyncAction(input: AutoSyncInput): AutoSyncAction {
                 } else {
                     AutoSyncAction.NONE
                 }
-            AutoSyncTrigger.PERIODIC, AutoSyncTrigger.WORKER -> {
+            AutoSyncTrigger.PERIODIC -> AutoSyncAction.NONE
+            AutoSyncTrigger.WORKER -> {
                 val sinceFinish = input.millisSinceLastFinish
                 if (sinceFinish == null || sinceFinish >= AutoSync.CHAIN_COOLDOWN_MS) {
                     AutoSyncAction.SYNC

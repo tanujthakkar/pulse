@@ -1,7 +1,6 @@
 package app.pulse.link
 
 import android.content.Context
-import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -27,15 +26,18 @@ import javax.inject.Singleton
 /**
  * Starts history pulls on the existing sync path.
  *
- * A connect, a foreground open, and a [AutoSync.INTERVAL_MS] timer each ask
- * [HistorySyncHost.syncNow]. That attempt still sends command 23 only after
- * a chunk is saved, and only while the user switch is on. This class does
- * not write that switch or send its own strap command.
+ * A connect and a foreground open ask [HistorySyncHost.syncNow]. The
+ * five-minute gap is only the WorkManager chain. An in-process timer used to
+ * start another pull on the main thread, and the close of that pull replaced
+ * the pending chain request before the worker could run. That timer is gone.
+ * The attempt still sends command 23 only after a chunk is saved, and only
+ * while the user switch is on. This class does not write that switch or send
+ * its own strap command.
  *
  * The foreground service keeps the radio up and reconnects a drop on its
- * own. WorkManager is a separate five-minute one-time chain, not a second
- * foreground service. It does not scan unless a device row is already stored,
- * and it waits while the battery is low. Doze may run that chain later.
+ * own. The chain is not a second foreground service. It does not scan unless
+ * a device row is already stored, and it waits while the battery is low.
+ * Doze may run that chain later.
  */
 @Singleton
 class AutoSyncCoordinator @Inject constructor(
@@ -45,19 +47,14 @@ class AutoSyncCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val clock: () -> Long = { System.currentTimeMillis() }
-    private val handler = Handler(Looper.getMainLooper())
-    private val periodic = object : Runnable {
-        override fun run() {
-            on(AutoSyncTrigger.PERIODIC)
-            handler.postDelayed(this, AutoSync.INTERVAL_MS)
-        }
-    }
     private var started = false
     private var wasLinked = false
     private var lastStartMs: Long? = null
     private var lastFinishMs: Long? = null
     private var sawRunning = false
     private var finishWatchInstalled = false
+    /** The launch pull has already moved the chain's delay to a finish. */
+    private var retimed = false
     @Volatile private var workerDepth: Int = 0
     @Volatile internal var workerRuns: Int = 0
     @Volatile internal var lastWorkerOutcome: AutoSyncOutcome? = null
@@ -85,19 +82,29 @@ class AutoSyncCoordinator @Inject constructor(
                 }
             },
         )
-        handler.postDelayed(periodic, AutoSync.INTERVAL_MS)
         ensureChain(SyncChainReason.APP_START)
     }
+
+    /**
+     * The old five-minute in-process tick.
+     *
+     * It does not start a pull and it does not enqueue work. The chain is the
+     * only scheduler on that interval. Tests call this where the timer used
+     * to fire.
+     */
+    internal fun onInterval() = Unit
 
     /**
      * Records when a history attempt stops, and restarts the chain delay from
      * that moment when this process's worker is not the one running it.
      *
      * App start enqueues the chain at the same time the launch pull starts.
-     * Replacing that pending request at the finish makes the next five minutes
-     * begin then. [beginWorker] skips the replace while [AutoSyncWorker] is
-     * inside its run, because REPLACE would cancel that worker. The worker
-     * appends its own follow-up instead.
+     * The first in-process finish replaces that pending request so the next
+     * five minutes begin then. A later finish, including a foreground pull,
+     * leaves the pending request in place. Replacing it cancelled the worker
+     * before the run could succeed. [beginWorker] also skips the replace
+     * while [AutoSyncWorker] is inside its run, because REPLACE would cancel
+     * that worker. The worker appends its own follow-up instead.
      */
     internal fun armFinishWatch() {
         if (finishWatchInstalled) return
@@ -106,7 +113,8 @@ class AutoSyncCoordinator @Inject constructor(
             val running = sync.running.value
             if (sawRunning && !running) {
                 lastFinishMs = clock()
-                if (workerDepth == 0) {
+                if (workerDepth == 0 && !retimed) {
+                    retimed = true
                     chainWrites.execute {
                         if (workerDepth != 0) return@execute
                         try {
@@ -337,6 +345,7 @@ class AutoSyncCoordinator @Inject constructor(
      * call, which is the end of [AutoSyncWorker.doWork].
      */
     fun scheduleAfterRun() {
+        retimed = true
         SyncWork.enqueue(context, syncChainRequest(SyncChainReason.AFTER_RUN))
     }
 }

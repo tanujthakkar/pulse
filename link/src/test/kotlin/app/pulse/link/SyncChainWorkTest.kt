@@ -14,6 +14,7 @@ import app.pulse.data.DeviceDirectory
 import app.pulse.data.DeviceRow
 import app.pulse.sync.AutoSync
 import app.pulse.sync.AutoSyncOutcome
+import app.pulse.sync.AutoSyncTrigger
 import app.pulse.sync.ChunkReceipt
 import app.pulse.sync.PersistedChunk
 import app.pulse.sync.R18Draft
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -97,19 +99,51 @@ class SyncChainWorkTest {
         assertNoFailures()
     }
 
+    @Test
+    fun intervalTicksLeaveTwoWorkerRunsSucceeded() {
+        val coordinator = readyAfterLaunchSync()
+        val host = sync
+        AutoSyncWorker.coordinatorForTest = coordinator
+        val first = enqueueChain()
+        pokeInterval(coordinator, host)
+        assertEquals(first, awaitEnqueued(excluding = null).id)
+        drive(first)
+        assertEquals(WorkInfo.State.SUCCEEDED, info(first).state)
+        val second = awaitEnqueued(excluding = first)
+        pokeInterval(coordinator, host)
+        assertEquals(second.id, awaitEnqueued(excluding = first).id)
+        drive(second.id)
+        assertEquals(WorkInfo.State.SUCCEEDED, info(second.id).state)
+        assertEquals(2, coordinator.workerRuns)
+        assertEquals(AutoSyncOutcome.COOLING_DOWN, coordinator.lastWorkerOutcome)
+        assertEquals(WorkInfo.State.ENQUEUED, awaitEnqueued(excluding = second.id).state)
+        assertNoFailures()
+    }
+
+    private lateinit var sync: HistorySyncHost
+
+    private fun pokeInterval(coordinator: AutoSyncCoordinator, host: HistorySyncHost) {
+        coordinator.rememberFinish(System.currentTimeMillis() - AutoSync.INTERVAL_MS)
+        coordinator.onInterval()
+        assertEquals(AutoSyncOutcome.IDLE, coordinator.on(AutoSyncTrigger.PERIODIC))
+        assertFalse(host.running.value)
+        coordinator.rememberFinish(System.currentTimeMillis())
+    }
+
     private fun readyAfterLaunchSync(): AutoSyncCoordinator {
         val commands = StrapCommandPort()
         commands.bind { }
         commands.markReady(ADDRESS)
         val link = StrapLink(presentPorts(), idleClock())
-        val sync = HistorySyncHost(commands, QuietStore(), link)
-        val coordinator = AutoSyncCoordinator(link, sync, NoDevice(), context)
+        val host = HistorySyncHost(commands, QuietStore(), link)
+        sync = host
+        val coordinator = AutoSyncCoordinator(link, host, NoDevice(), context)
         link.start()
         link.onSighting(StrapSighting(ADDRESS, rssi = -40, advertisedName = null))
         link.onSessionReady()
         link.onDeviceReport(DeviceReport(settled = true, succeeded = true, heartRateLive = true))
         assertEquals(HelloProgress.SUCCEEDED, link.snapshot().hello)
-        assertEquals(false, sync.running.value)
+        assertEquals(false, host.running.value)
         coordinator.rememberFinish(System.currentTimeMillis())
         return coordinator
     }
@@ -118,6 +152,9 @@ class SyncChainWorkTest {
         AutoSyncWorker.coordinatorForTest!!.ensureChain(SyncChainReason.APP_START)
         return awaitEnqueued(excluding = null).id
     }
+
+    private fun info(id: UUID): WorkInfo =
+        WorkManager.getInstance(context).getWorkInfoById(id).get(2, TimeUnit.SECONDS)!!
 
     private fun drive(id: UUID) {
         val driver = WorkManagerTestInitHelper.getTestDriver(context)!!

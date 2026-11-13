@@ -69,7 +69,10 @@ enum class StrapScenario(val wireName: String) {
     ;
 
     companion object {
-        fun fromName(name: String?): StrapScenario =
-            entries.firstOrNull { it.wireName == name } ?: NORMAL
+        fun fromName(name: String?): StrapScenario {
+            val key = name?.trim()?.lowercase()
+            if (key == "disconnect" || key == "disconnected") return DISCONNECT
+            return entries.firstOrNull { it.wireName == key } ?: NORMAL
+        }
     }
 }

@@ -3,22 +3,32 @@
 ## Background sync
 
 History still syncs on connect and when the app comes to the foreground. The
-gap between pulls is five minutes.
+gap between pulls is five minutes, and the WorkManager chain is the only
+scheduler for that gap. There is no in-process timer. One used to start a
+pull on the main thread from the launch time, and the close of that pull
+replaced the pending chain request, so the worker was cancelled before it
+could succeed.
 
 WorkManager periodic work cannot be shorter than fifteen minutes, so the
 fallback is a unique one-time request named `pulse-history-chain`. App start
 and boot enqueue it with KEEP when no request is already pending. That first
-delay starts with the process. When the launch pull finishes, the pending
-request is replaced so the next five minutes are measured from the finish.
-Each worker run appends the next request when it returns, so the delay is
-measured from the end of that run as well. The append uses
+delay starts with the process. When the launch pull finishes, that pending
+request is replaced once so the next five minutes are measured from the
+finish. A later finish, including a foreground pull, leaves the pending
+request alone. Each worker run appends the next request when it returns, so
+the delay is measured from the end of that run as well. The append uses
 APPEND_OR_REPLACE. A failure result marks that appended request FAILED
 without running it, so a cooldown, a skip, and an already-running sync
 return success and still append. A link that is not ready returns retry,
 and the request's linear five-minute backoff is the reschedule. The worker
-and the in-process timer may start another pull one minute after the
-previous attempt finished, which is shorter than the chain delay. The old
-periodic name `pulse-history-sync` is cancelled on enqueue.
+may start another pull one minute after the previous attempt finished,
+which is shorter than the chain delay. The old periodic name
+`pulse-history-sync` is cancelled on enqueue.
+
+On the simulated strap, a history start after the series has already
+finished returns a start frame and a complete frame and no records, so the
+attempt ends instead of waiting out the one-minute watchdog. The launch
+extra `simulated_scenario` accepts `disconnect` and `disconnected`.
 
 The request requires the battery not to be low and does not require a
 network. It is not a foreground service and it does not post a notification.
